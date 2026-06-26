@@ -1,10 +1,10 @@
 # Build stage
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
 # Install templ
-RUN go install github.com/a-h/templ/cmd/templ@v0.2.793
+RUN go install github.com/a-h/templ/cmd/templ@v0.3.1020
 
 # Copy go mod files first for caching
 COPY go.mod go.sum ./
