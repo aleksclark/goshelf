@@ -6,24 +6,61 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 )
 
+var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
+
+// SeriesSlug generates a URL-safe slug from a series name.
+func SeriesSlug(name string) string {
+	s := strings.ToLower(strings.TrimSpace(name))
+	s = slugRe.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-")
+	return s
+}
+
+// ParseSeriesName extracts the primary series name from a seriesTitle field.
+// e.g. "Discworld - Rincewind #6; Other #1" -> "Discworld - Rincewind"
+func ParseSeriesName(seriesTitle string) string {
+	if seriesTitle == "" {
+		return ""
+	}
+	// Take first series (before semicolon)
+	part := strings.SplitN(seriesTitle, ";", 2)[0]
+	part = strings.TrimSpace(part)
+	// Remove position number (e.g. "#6")
+	if idx := strings.LastIndex(part, "#"); idx > 0 {
+		part = strings.TrimSpace(part[:idx])
+	}
+	return part
+}
+
+type SeriesInfo struct {
+	Name      string
+	Slug      string
+	BookCount int
+	HasCover  bool
+	FirstBook int // ID of first book (for cover)
+}
+
 type Client struct {
 	baseURL    string
 	apiKey     string
 	httpClient *http.Client
 
-	mu          sync.RWMutex
-	authors     []Author
-	books       []Book
-	authorMap   map[int]string // authorID -> name
-	booksByAuth map[int][]Book // authorID -> books
-	bookByID    map[int]*Book  // bookID -> book
-	loaded      bool
+	mu            sync.RWMutex
+	authors       []Author
+	books         []Book
+	authorMap     map[int]string // authorID -> name
+	booksByAuth   map[int][]Book // authorID -> books
+	bookByID      map[int]*Book  // bookID -> book
+	seriesList    []SeriesInfo   // all series sorted by name
+	booksBySeries map[string][]Book // slug -> books
+	loaded        bool
 }
 
 type Author struct {
@@ -93,9 +130,10 @@ func NewClient(baseURL, apiKey string) *Client {
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
-		authorMap:   make(map[int]string),
-		booksByAuth: make(map[int][]Book),
-		bookByID:    make(map[int]*Book),
+		authorMap:     make(map[int]string),
+		booksByAuth:   make(map[int][]Book),
+		bookByID:      make(map[int]*Book),
+		booksBySeries: make(map[string][]Book),
 	}
 
 	// Initial load (blocking)
@@ -168,8 +206,6 @@ func (c *Client) fetchAll() error {
 		}
 	}
 
-	log.Printf("Readarr: %d authors, %d total books, %d with files", len(authors), len(allBooks), len(books))
-
 	// Build indexes
 	authorMap := make(map[int]string, len(authors))
 	for _, a := range authors {
@@ -178,11 +214,47 @@ func (c *Client) fetchAll() error {
 
 	booksByAuth := make(map[int][]Book)
 	bookByID := make(map[int]*Book)
+	booksBySeries := make(map[string][]Book)
+	seriesMap := make(map[string]*SeriesInfo) // slug -> info
+
 	for i := range books {
 		b := &books[i]
 		booksByAuth[b.AuthorID] = append(booksByAuth[b.AuthorID], *b)
 		bookByID[b.ID] = b
+
+		// Build series index from seriesTitle
+		seriesName := ParseSeriesName(b.SeriesTitle)
+		if seriesName != "" {
+			slug := SeriesSlug(seriesName)
+			booksBySeries[slug] = append(booksBySeries[slug], *b)
+			if _, ok := seriesMap[slug]; !ok {
+				hasCover := len(b.Images) > 0
+				seriesMap[slug] = &SeriesInfo{
+					Name:      seriesName,
+					Slug:      slug,
+					BookCount: 0,
+					HasCover:  hasCover,
+					FirstBook: b.ID,
+				}
+			}
+			seriesMap[slug].BookCount++
+			if !seriesMap[slug].HasCover && len(b.Images) > 0 {
+				seriesMap[slug].HasCover = true
+				seriesMap[slug].FirstBook = b.ID
+			}
+		}
 	}
+
+	// Build sorted series list
+	seriesList := make([]SeriesInfo, 0, len(seriesMap))
+	for _, si := range seriesMap {
+		seriesList = append(seriesList, *si)
+	}
+	sort.Slice(seriesList, func(i, j int) bool {
+		return strings.ToLower(seriesList[i].Name) < strings.ToLower(seriesList[j].Name)
+	})
+
+	log.Printf("Readarr: %d authors, %d total books, %d with files, %d series", len(authors), len(allBooks), len(books), len(seriesList))
 
 	c.mu.Lock()
 	c.authors = authors
@@ -190,6 +262,8 @@ func (c *Client) fetchAll() error {
 	c.authorMap = authorMap
 	c.booksByAuth = booksByAuth
 	c.bookByID = bookByID
+	c.seriesList = seriesList
+	c.booksBySeries = booksBySeries
 	c.loaded = true
 	c.mu.Unlock()
 
@@ -277,6 +351,50 @@ func (c *Client) GetCachedBooks() ([]Book, map[int]string, error) {
 	return c.books, c.authorMap, nil
 }
 
+// GetCachedSeries returns all series sorted by name.
+func (c *Client) GetCachedSeries() ([]SeriesInfo, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if !c.loaded {
+		return nil, fmt.Errorf("data not yet loaded")
+	}
+
+	return c.seriesList, nil
+}
+
+// GetCachedBooksBySeries returns books for a specific series by slug.
+func (c *Client) GetCachedBooksBySeries(slug string) ([]Book, string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if !c.loaded {
+		return nil, "", fmt.Errorf("data not yet loaded")
+	}
+
+	books := c.booksBySeries[slug]
+	if len(books) == 0 {
+		return nil, "", fmt.Errorf("series not found")
+	}
+
+	// Get series name from the first book
+	seriesName := ParseSeriesName(books[0].SeriesTitle)
+
+	// Sort by position in series title
+	sorted := make([]Book, len(books))
+	copy(sorted, books)
+	sort.Slice(sorted, func(i, j int) bool {
+		pi := extractPosition(sorted[i].SeriesTitle)
+		pj := extractPosition(sorted[j].SeriesTitle)
+		if pi != pj {
+			return pi < pj
+		}
+		return strings.ToLower(sorted[i].Title) < strings.ToLower(sorted[j].Title)
+	})
+
+	return sorted, seriesName, nil
+}
+
 // HasCover checks if a book has a cover image in readarr.
 func (c *Client) HasCover(bookID int) bool {
 	c.mu.RLock()
@@ -297,7 +415,29 @@ func seriesKey(b Book) string {
 		}
 		return strings.ToLower(sl.Title) + "|" + pos
 	}
+	// Fall back to seriesTitle field
+	name := ParseSeriesName(b.SeriesTitle)
+	if name != "" {
+		pos := extractPosition(b.SeriesTitle)
+		return strings.ToLower(name) + "|" + fmt.Sprintf("%010.2f", pos)
+	}
 	return "\xff" // sort non-series books last
+}
+
+// extractPosition parses the position number from a seriesTitle like "Series #3.5"
+func extractPosition(seriesTitle string) float64 {
+	if seriesTitle == "" {
+		return 9999
+	}
+	part := strings.SplitN(seriesTitle, ";", 2)[0]
+	if idx := strings.LastIndex(part, "#"); idx >= 0 {
+		numStr := strings.TrimSpace(part[idx+1:])
+		var pos float64
+		if _, err := fmt.Sscanf(numStr, "%f", &pos); err == nil {
+			return pos
+		}
+	}
+	return 9999
 }
 
 func (c *Client) GetBook(id int) (*Book, error) {

@@ -44,8 +44,11 @@ func main() {
 	// Library routes (protected)
 	mux.HandleFunc("GET /", h.RequireAuth(h.Library))
 	mux.HandleFunc("GET /authors/{id}", h.RequireAuth(h.AuthorBooks))
+	mux.HandleFunc("GET /books", h.RequireAuth(h.AllBooks))
 	mux.HandleFunc("GET /books/{id}", h.RequireAuth(h.BookDetail))
 	mux.HandleFunc("GET /books/{id}/download.zip", h.RequireAuth(h.DownloadZip))
+	mux.HandleFunc("GET /series", h.RequireAuth(h.SeriesList))
+	mux.HandleFunc("GET /series/{slug}", h.RequireAuth(h.SeriesBooks))
 	mux.HandleFunc("GET /search", h.RequireAuth(h.Search))
 	mux.HandleFunc("GET /search-authors", h.RequireAuth(h.SearchAuthors))
 
