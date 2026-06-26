@@ -2,7 +2,7 @@ package templates
 
 import "fmt"
 
-templ LibraryPage(books []BookDisplayData, username string, query string, sortBy string) {
+templ LibraryPage(books []BookDisplayData, username string, query string, sortBy string, page int, totalPages int) {
 	@Layout("Library", username) {
 		<div class="mb-6">
 			<h1 class="text-2xl font-bold mb-4">Library</h1>
@@ -37,8 +37,53 @@ templ LibraryPage(books []BookDisplayData, username string, query string, sortBy
 			</div>
 		</div>
 		<div id="book-grid">
-			@BookGrid(books)
+			@BookGridWithPagination(books, page, totalPages, query, sortBy)
 		</div>
+	}
+}
+
+templ BookGridWithPagination(books []BookDisplayData, page int, totalPages int, query string, sortBy string) {
+	if len(books) == 0 {
+		<div class="text-center text-gray-400 py-12">
+			<p class="text-lg">No audiobooks found</p>
+		</div>
+	} else {
+		<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+			for _, book := range books {
+				@BookCard(book)
+			}
+		</div>
+		if totalPages > 1 {
+			<div class="mt-8 flex justify-center items-center gap-2">
+				if page > 1 {
+					<a
+						href={ templ.SafeURL(fmt.Sprintf("/?q=%s&sort=%s&page=%d", query, sortBy, page-1)) }
+						hx-get={ fmt.Sprintf("/search?q=%s&sort=%s&page=%d", query, sortBy, page-1) }
+						hx-target="#book-grid"
+						class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+					>
+						&larr; Prev
+					</a>
+				} else {
+					<span class="px-4 py-2 bg-gray-800 text-gray-500 rounded-lg cursor-not-allowed">&larr; Prev</span>
+				}
+				<span class="px-4 py-2 text-gray-300">
+					Page { fmt.Sprintf("%d", page) } of { fmt.Sprintf("%d", totalPages) }
+				</span>
+				if page < totalPages {
+					<a
+						href={ templ.SafeURL(fmt.Sprintf("/?q=%s&sort=%s&page=%d", query, sortBy, page+1)) }
+						hx-get={ fmt.Sprintf("/search?q=%s&sort=%s&page=%d", query, sortBy, page+1) }
+						hx-target="#book-grid"
+						class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+					>
+						Next &rarr;
+					</a>
+				} else {
+					<span class="px-4 py-2 bg-gray-800 text-gray-500 rounded-lg cursor-not-allowed">Next &rarr;</span>
+				}
+			</div>
+		}
 	}
 }
 
@@ -67,6 +112,7 @@ templ BookCard(book BookDisplayData) {
 				alt={ book.Title }
 				class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
 				loading="lazy"
+				onerror="this.style.display='none';this.parentElement.innerHTML='<div class=\\'flex items-center justify-center h-full text-gray-500 text-4xl\\'>📚</div>'"
 			/>
 		</div>
 		<div class="p-3">

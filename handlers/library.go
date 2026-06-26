@@ -11,14 +11,7 @@ import (
 	"github.com/aleksclark/goshelf/templates"
 )
 
-type BookDisplay struct {
-	ID          int
-	Title       string
-	Author      string
-	SeriesTitle string
-	Overview    string
-	Added       string
-}
+const booksPerPage = 36
 
 func (h *Handlers) Library(w http.ResponseWriter, r *http.Request) {
 	books, err := h.client.GetBooks()
@@ -40,18 +33,20 @@ func (h *Handlers) Library(w http.ResponseWriter, r *http.Request) {
 
 	query := r.URL.Query().Get("q")
 	sortBy := r.URL.Query().Get("sort")
+	page := getPage(r)
 
-	displayBooks := filterAndSort(books, authorMap, query, sortBy)
+	allBooks := filterAndSort(books, authorMap, query, sortBy)
+	paged, totalPages := paginate(allBooks, page)
 
 	username := r.Header.Get("X-Username")
 
-	// If HTMX request, return only the book grid
+	// If HTMX request, return only the book grid + pagination
 	if r.Header.Get("HX-Request") == "true" {
-		templates.BookGrid(displayBooks).Render(r.Context(), w)
+		templates.BookGridWithPagination(paged, page, totalPages, query, sortBy).Render(r.Context(), w)
 		return
 	}
 
-	templates.LibraryPage(displayBooks, username, query, sortBy).Render(r.Context(), w)
+	templates.LibraryPage(paged, username, query, sortBy, page, totalPages).Render(r.Context(), w)
 }
 
 func (h *Handlers) Search(w http.ResponseWriter, r *http.Request) {
@@ -73,10 +68,40 @@ func (h *Handlers) Search(w http.ResponseWriter, r *http.Request) {
 
 	query := r.URL.Query().Get("q")
 	sortBy := r.URL.Query().Get("sort")
+	page := getPage(r)
 
-	displayBooks := filterAndSort(books, authorMap, query, sortBy)
+	allBooks := filterAndSort(books, authorMap, query, sortBy)
+	paged, totalPages := paginate(allBooks, page)
 
-	templates.BookGrid(displayBooks).Render(r.Context(), w)
+	templates.BookGridWithPagination(paged, page, totalPages, query, sortBy).Render(r.Context(), w)
+}
+
+func getPage(r *http.Request) int {
+	pageStr := r.URL.Query().Get("page")
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		return 1
+	}
+	return page
+}
+
+func paginate(books []templates.BookDisplayData, page int) ([]templates.BookDisplayData, int) {
+	total := len(books)
+	totalPages := (total + booksPerPage - 1) / booksPerPage
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+
+	start := (page - 1) * booksPerPage
+	end := start + booksPerPage
+	if end > total {
+		end = total
+	}
+
+	return books[start:end], totalPages
 }
 
 func (h *Handlers) BookDetail(w http.ResponseWriter, r *http.Request) {

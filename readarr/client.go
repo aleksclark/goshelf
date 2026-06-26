@@ -149,7 +149,8 @@ func (c *Client) GetBookFiles(bookID int) ([]BookFile, error) {
 }
 
 func (c *Client) ProxyCover(bookID int, w http.ResponseWriter) error {
-	path := fmt.Sprintf("/api/v1/MediaCover/Books/%d/cover.jpg", bookID)
+	// Readarr serves covers at /MediaCover/Books/{id}/cover.jpg (no /api/v1 prefix)
+	path := fmt.Sprintf("/MediaCover/Books/%d/cover.jpg", bookID)
 	resp, err := c.doRequest(path)
 	if err != nil {
 		return fmt.Errorf("proxy cover: %w", err)
