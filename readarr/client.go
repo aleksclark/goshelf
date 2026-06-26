@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -12,6 +15,13 @@ type Client struct {
 	baseURL    string
 	apiKey     string
 	httpClient *http.Client
+
+	mu          sync.RWMutex
+	authors     []Author
+	books       []Book
+	authorMap   map[int]string // authorID -> name
+	booksByAuth map[int][]Book // authorID -> books
+	lastRefresh time.Time
 }
 
 type Author struct {
@@ -28,10 +38,10 @@ type Image struct {
 }
 
 type SeriesLink struct {
-	ID             int    `json:"id"`
-	Position       string `json:"position"`
-	SeriesID       int    `json:"seriesId"`
-	Title          string `json:"title"`
+	ID       int    `json:"id"`
+	Position string `json:"position"`
+	SeriesID int    `json:"seriesId"`
+	Title    string `json:"title"`
 }
 
 type Book struct {
@@ -56,13 +66,26 @@ type BookFile struct {
 	AuthorID int    `json:"authorId"`
 }
 
+// AuthorDisplay is a pre-computed view of an author for the UI.
+type AuthorDisplay struct {
+	ID        int
+	Name      string
+	BookCount int
+	HasCover  bool // true if at least one book has a cover
+	FirstBook int  // ID of first book (for cover image)
+}
+
+const cacheTTL = 5 * time.Minute
+
 func NewClient(baseURL, apiKey string) *Client {
 	return &Client{
 		baseURL: baseURL,
 		apiKey:  apiKey,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 60 * time.Second,
 		},
+		authorMap:   make(map[int]string),
+		booksByAuth: make(map[int][]Book),
 	}
 }
 
@@ -76,40 +99,168 @@ func (c *Client) doRequest(path string) (*http.Response, error) {
 	return c.httpClient.Do(req)
 }
 
-func (c *Client) GetAuthors() ([]Author, error) {
+func (c *Client) refreshCache() error {
+	c.mu.RLock()
+	if time.Since(c.lastRefresh) < cacheTTL && len(c.books) > 0 {
+		c.mu.RUnlock()
+		return nil
+	}
+	c.mu.RUnlock()
+
+	// Fetch authors
 	resp, err := c.doRequest("/api/v1/author")
 	if err != nil {
-		return nil, fmt.Errorf("get authors: %w", err)
+		return fmt.Errorf("get authors: %w", err)
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("get authors: status %d", resp.StatusCode)
+		return fmt.Errorf("get authors: status %d", resp.StatusCode)
 	}
-
 	var authors []Author
 	if err := json.NewDecoder(resp.Body).Decode(&authors); err != nil {
-		return nil, fmt.Errorf("decode authors: %w", err)
+		return fmt.Errorf("decode authors: %w", err)
 	}
-	return authors, nil
+
+	// Fetch books
+	resp2, err := c.doRequest("/api/v1/book")
+	if err != nil {
+		return fmt.Errorf("get books: %w", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		return fmt.Errorf("get books: status %d", resp2.StatusCode)
+	}
+	var books []Book
+	if err := json.NewDecoder(resp2.Body).Decode(&books); err != nil {
+		return fmt.Errorf("decode books: %w", err)
+	}
+
+	// Build indexes
+	authorMap := make(map[int]string, len(authors))
+	for _, a := range authors {
+		authorMap[a.ID] = a.AuthorName
+	}
+
+	booksByAuth := make(map[int][]Book)
+	for _, b := range books {
+		booksByAuth[b.AuthorID] = append(booksByAuth[b.AuthorID], b)
+	}
+
+	c.mu.Lock()
+	c.authors = authors
+	c.books = books
+	c.authorMap = authorMap
+	c.booksByAuth = booksByAuth
+	c.lastRefresh = time.Now()
+	c.mu.Unlock()
+
+	return nil
 }
 
-func (c *Client) GetBooks() ([]Book, error) {
-	resp, err := c.doRequest("/api/v1/book")
-	if err != nil {
-		return nil, fmt.Errorf("get books: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("get books: status %d", resp.StatusCode)
+// GetCachedAuthors returns sorted author display list from cache.
+func (c *Client) GetCachedAuthors() ([]AuthorDisplay, error) {
+	if err := c.refreshCache(); err != nil {
+		return nil, err
 	}
 
-	var books []Book
-	if err := json.NewDecoder(resp.Body).Decode(&books); err != nil {
-		return nil, fmt.Errorf("decode books: %w", err)
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	result := make([]AuthorDisplay, 0, len(c.authors))
+	for _, a := range c.authors {
+		books := c.booksByAuth[a.ID]
+		if len(books) == 0 {
+			continue
+		}
+
+		hasCover := false
+		firstBook := books[0].ID
+		for _, b := range books {
+			if len(b.Images) > 0 {
+				hasCover = true
+				firstBook = b.ID
+				break
+			}
+		}
+
+		result = append(result, AuthorDisplay{
+			ID:        a.ID,
+			Name:      a.AuthorName,
+			BookCount: len(books),
+			HasCover:  hasCover,
+			FirstBook: firstBook,
+		})
 	}
-	return books, nil
+
+	sort.Slice(result, func(i, j int) bool {
+		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+	})
+
+	return result, nil
+}
+
+// GetCachedBooksByAuthor returns books for a specific author from cache.
+func (c *Client) GetCachedBooksByAuthor(authorID int) ([]Book, string, error) {
+	if err := c.refreshCache(); err != nil {
+		return nil, "", err
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	name := c.authorMap[authorID]
+	books := c.booksByAuth[authorID]
+
+	// Sort by series+position, then title
+	sorted := make([]Book, len(books))
+	copy(sorted, books)
+	sort.Slice(sorted, func(i, j int) bool {
+		si := seriesKey(sorted[i])
+		sj := seriesKey(sorted[j])
+		if si != sj {
+			return si < sj
+		}
+		return strings.ToLower(sorted[i].Title) < strings.ToLower(sorted[j].Title)
+	})
+
+	return sorted, name, nil
+}
+
+// GetCachedBooks returns all books from cache (for search).
+func (c *Client) GetCachedBooks() ([]Book, map[int]string, error) {
+	if err := c.refreshCache(); err != nil {
+		return nil, nil, err
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.books, c.authorMap, nil
+}
+
+// HasCover checks if a book has a cover image in readarr.
+func (c *Client) HasCover(bookID int) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	for _, b := range c.books {
+		if b.ID == bookID {
+			return len(b.Images) > 0
+		}
+	}
+	return false
+}
+
+func seriesKey(b Book) string {
+	if len(b.SeriesLinks) > 0 {
+		sl := b.SeriesLinks[0]
+		pos := sl.Position
+		if len(pos) == 1 {
+			pos = "0" + pos // zero-pad for sorting
+		}
+		return strings.ToLower(sl.Title) + "|" + pos
+	}
+	return "\xff" // sort non-series books last
 }
 
 func (c *Client) GetBook(id int) (*Book, error) {

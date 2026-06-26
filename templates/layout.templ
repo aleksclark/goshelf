@@ -15,16 +15,18 @@ templ Layout(title string, username string) {
 		</head>
 		<body class="bg-gray-900 text-gray-100 min-h-screen">
 			if username != "" {
-				<nav class="bg-gray-800 border-b border-gray-700 px-6 py-4">
-					<div class="max-w-7xl mx-auto flex justify-between items-center">
+			<nav class="bg-gray-800 border-b border-gray-700 px-6 py-4">
+				<div class="max-w-7xl mx-auto flex justify-between items-center">
+					<div class="flex items-center gap-6">
 						<a href="/" class="text-xl font-bold text-indigo-400 hover:text-indigo-300">GoShelf</a>
-						<div class="flex items-center gap-4">
-							<a href="/admin/users" class="text-sm text-gray-300 hover:text-white">Users</a>
-							<span class="text-sm text-gray-400">{ username }</span>
-							<a href="/logout" class="text-sm text-red-400 hover:text-red-300">Logout</a>
-						</div>
 					</div>
-				</nav>
+					<div class="flex items-center gap-4">
+						<a href="/admin/users" class="text-sm text-gray-300 hover:text-white">Users</a>
+						<span class="text-sm text-gray-400">{ username }</span>
+						<a href="/logout" class="text-sm text-red-400 hover:text-red-300">Logout</a>
+					</div>
+				</div>
+			</nav>
 			}
 			<main class="max-w-7xl mx-auto px-4 py-8">
 				{ children... }

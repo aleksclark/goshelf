@@ -8,6 +8,7 @@ type BookDisplayData struct {
 	Title       string
 	Author      string
 	SeriesTitle string
+	HasCover    bool
 	Added       time.Time
 }
 
