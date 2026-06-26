@@ -3,7 +3,7 @@ module github.com/aleksclark/goshelf
 go 1.25.0
 
 require (
-	github.com/a-h/templ v0.3.1020
+	github.com/a-h/templ v0.2.793
 	golang.org/x/crypto v0.32.0
 	modernc.org/sqlite v1.34.5
 )
