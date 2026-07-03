@@ -10,6 +10,8 @@ import (
 	"github.com/aleksclark/goshelf/readarr"
 )
 
+var Version = "dev"
+
 func main() {
 	// Configuration from environment
 	readarrURL := getEnv("READARR_URL", "http://192.168.0.24:8787")
