@@ -37,7 +37,7 @@ func (h *Handlers) Library(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	templates.AuthorsPage(paged, username, query, page, totalPages).Render(r.Context(), w)
+	templates.AuthorsPage(paged, username, isAdmin(r), query, page, totalPages).Render(r.Context(), w)
 }
 
 // AuthorBooks shows all books by a specific author.
@@ -58,7 +58,7 @@ func (h *Handlers) AuthorBooks(w http.ResponseWriter, r *http.Request) {
 
 	displayBooks := makeDisplayBooks(books, authorName, id)
 	username := r.Header.Get("X-Username")
-	templates.AuthorBooksPage(displayBooks, authorName, username).Render(r.Context(), w)
+	templates.AuthorBooksPage(displayBooks, authorName, username, isAdmin(r)).Render(r.Context(), w)
 }
 
 // SeriesList shows all series.
@@ -83,7 +83,7 @@ func (h *Handlers) SeriesList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	templates.SeriesListPage(paged, username, query, page, totalPages).Render(r.Context(), w)
+	templates.SeriesListPage(paged, username, isAdmin(r), query, page, totalPages).Render(r.Context(), w)
 }
 
 // SeriesBooks shows all books in a specific series.
@@ -131,7 +131,7 @@ func (h *Handlers) SeriesBooks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	username := r.Header.Get("X-Username")
-	templates.SeriesBooksPage(displayBooks, seriesName, username).Render(r.Context(), w)
+	templates.SeriesBooksPage(displayBooks, seriesName, username, isAdmin(r)).Render(r.Context(), w)
 }
 
 // AllBooks shows all books in a flat grid with search and sort.
@@ -157,7 +157,7 @@ func (h *Handlers) AllBooks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	templates.BooksPage(paged, username, query, sortBy, page, totalPages).Render(r.Context(), w)
+	templates.BooksPage(paged, username, isAdmin(r), query, sortBy, page, totalPages).Render(r.Context(), w)
 }
 
 // Search handles the search box — searches across all books (HTMX endpoint).
@@ -255,7 +255,7 @@ func (h *Handlers) BookDetail(w http.ResponseWriter, r *http.Request) {
 	hasCover := len(book.Images) > 0
 	username := r.Header.Get("X-Username")
 
-	templates.BookDetailPage(book.ID, book.Title, authorName, seriesInfo, book.Overview, files, totalSize, hasCover, username).Render(r.Context(), w)
+	templates.BookDetailPage(book.ID, book.Title, authorName, seriesInfo, book.Overview, files, totalSize, hasCover, username, isAdmin(r)).Render(r.Context(), w)
 }
 
 func getPage(r *http.Request) int {

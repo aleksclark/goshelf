@@ -3,8 +3,8 @@ package templates
 import "fmt"
 import "github.com/aleksclark/goshelf/readarr"
 
-templ AuthorBooksPage(books []BookDisplayData, authorName string, username string) {
-	@Layout(authorName, username) {
+templ AuthorBooksPage(books []BookDisplayData, authorName string, username string, isAdmin bool) {
+	@Layout(authorName, username, isAdmin) {
 		<div class="mb-4">
 			<a href="/" class="text-indigo-400 hover:text-indigo-300 text-sm">&larr; All Authors</a>
 		</div>
@@ -20,8 +20,8 @@ templ AuthorBooksPage(books []BookDisplayData, authorName string, username strin
 	}
 }
 
-templ SeriesBooksPage(books []BookDisplayData, seriesName string, username string) {
-	@Layout(seriesName, username) {
+templ SeriesBooksPage(books []BookDisplayData, seriesName string, username string, isAdmin bool) {
+	@Layout(seriesName, username, isAdmin) {
 		<div class="mb-4">
 			<a href="/series" class="text-indigo-400 hover:text-indigo-300 text-sm">&larr; All Series</a>
 		</div>
@@ -37,8 +37,8 @@ templ SeriesBooksPage(books []BookDisplayData, seriesName string, username strin
 	}
 }
 
-templ BooksPage(books []BookDisplayData, username string, query string, sortBy string, page int, totalPages int) {
-	@Layout("All Books", username) {
+templ BooksPage(books []BookDisplayData, username string, isAdmin bool, query string, sortBy string, page int, totalPages int) {
+	@Layout("All Books", username, isAdmin) {
 		<div class="mb-6">
 			<h1 class="text-2xl font-bold mb-4">All Books</h1>
 			<div class="flex flex-col sm:flex-row gap-4">
@@ -75,8 +75,8 @@ templ BooksPage(books []BookDisplayData, username string, query string, sortBy s
 	}
 }
 
-templ SeriesListPage(series []readarr.SeriesInfo, username string, query string, page int, totalPages int) {
-	@Layout("Series", username) {
+templ SeriesListPage(series []readarr.SeriesInfo, username string, isAdmin bool, query string, page int, totalPages int) {
+	@Layout("Series", username, isAdmin) {
 		<div class="mb-6">
 			<h1 class="text-2xl font-bold mb-4">Series</h1>
 			<div class="flex flex-col sm:flex-row gap-4">

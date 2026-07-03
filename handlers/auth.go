@@ -114,7 +114,7 @@ func (h *Handlers) RegisterSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := models.CreateUser(h.db, username, password)
+	user, err := models.CreateUser(h.db, username, password, true) // first user is admin
 	if err != nil {
 		templates.Register("Failed to create user: "+err.Error()).Render(r.Context(), w)
 		return

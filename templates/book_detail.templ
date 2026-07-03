@@ -2,8 +2,8 @@ package templates
 
 import "fmt"
 
-templ BookDetailPage(id int, title string, author string, seriesInfo string, overview string, files []BookFile, totalSize int64, hasCover bool, username string) {
-	@Layout(title, username) {
+templ BookDetailPage(id int, title string, author string, seriesInfo string, overview string, files []BookFile, totalSize int64, hasCover bool, username string, isAdmin bool) {
+	@Layout(title, username, isAdmin) {
 		<div class="mb-4">
 			<a href="javascript:history.back()" class="text-indigo-400 hover:text-indigo-300 text-sm">&larr; Back</a>
 		</div>

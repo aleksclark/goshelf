@@ -55,10 +55,11 @@ func main() {
 	// Cover proxy
 	mux.HandleFunc("GET /covers/{id}", h.RequireAuth(h.CoverProxy))
 
-	// Admin routes
-	mux.HandleFunc("GET /admin/users", h.RequireAuth(h.AdminUsers))
-	mux.HandleFunc("POST /admin/users", h.RequireAuth(h.AdminCreateUser))
-	mux.HandleFunc("POST /admin/users/{id}/delete", h.RequireAuth(h.AdminDeleteUser))
+	// Admin routes (require admin role)
+	mux.HandleFunc("GET /admin/users", h.RequireAdmin(h.AdminUsers))
+	mux.HandleFunc("POST /admin/users", h.RequireAdmin(h.AdminCreateUser))
+	mux.HandleFunc("POST /admin/users/{id}/delete", h.RequireAdmin(h.AdminDeleteUser))
+	mux.HandleFunc("POST /admin/users/{id}/toggle-admin", h.RequireAdmin(h.AdminToggleAdmin))
 
 	log.Printf("GoShelf starting on %s", listenAddr)
 	log.Printf("Readarr URL: %s", readarrURL)

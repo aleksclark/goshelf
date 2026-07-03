@@ -49,9 +49,29 @@ func (h *Handlers) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// Store user in request context via header (simple approach)
+		// Store user info in request headers (simple approach)
 		r.Header.Set("X-User-ID", fmt.Sprintf("%d", user.ID))
 		r.Header.Set("X-Username", user.Username)
+		if user.IsAdmin {
+			r.Header.Set("X-Is-Admin", "1")
+		} else {
+			r.Header.Set("X-Is-Admin", "0")
+		}
 		next(w, r)
 	}
+}
+
+func (h *Handlers) RequireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return h.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Is-Admin") != "1" {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	})
+}
+
+// isAdmin returns whether the current request user is an admin
+func isAdmin(r *http.Request) bool {
+	return r.Header.Get("X-Is-Admin") == "1"
 }

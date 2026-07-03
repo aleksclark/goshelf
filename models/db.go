@@ -32,6 +32,7 @@ func migrate(db *sql.DB) error {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		username TEXT UNIQUE NOT NULL,
 		password_hash TEXT NOT NULL,
+		is_admin INTEGER NOT NULL DEFAULT 0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
@@ -42,6 +43,25 @@ func migrate(db *sql.DB) error {
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 	);
 	`
-	_, err := db.Exec(schema)
-	return err
+	if _, err := db.Exec(schema); err != nil {
+		return err
+	}
+
+	// Migration: add is_admin column if missing (existing databases)
+	row := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('users') WHERE name='is_admin'")
+	var count int
+	if err := row.Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		if _, err := db.Exec("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+		// Make the first user (by ID) an admin
+		if _, err := db.Exec("UPDATE users SET is_admin = 1 WHERE id = (SELECT MIN(id) FROM users)"); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

@@ -5,8 +5,8 @@ import (
 	"github.com/aleksclark/goshelf/readarr"
 )
 
-templ AuthorsPage(authors []readarr.AuthorDisplay, username string, query string, page int, totalPages int) {
-	@Layout("Library", username) {
+templ AuthorsPage(authors []readarr.AuthorDisplay, username string, isAdmin bool, query string, page int, totalPages int) {
+	@Layout("Library", username, isAdmin) {
 		<div class="mb-6">
 			<h1 class="text-2xl font-bold mb-4">Authors</h1>
 			<div class="flex flex-col sm:flex-row gap-4">

@@ -40,7 +40,7 @@ func (h *Handlers) AdminCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := models.CreateUser(h.db, username, password)
+	_, err := models.CreateUser(h.db, username, password, false)
 	if err != nil {
 		log.Printf("Error creating user: %v", err)
 		users, _ := models.GetAllUsers(h.db)
@@ -74,6 +74,39 @@ func (h *Handlers) AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error deleting user: %v", err)
 		http.Error(w, "Failed to delete user", http.StatusInternalServerError)
 		return
+	}
+
+	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
+}
+
+func (h *Handlers) AdminToggleAdmin(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	// Don't allow removing admin from yourself
+	currentUsername := r.Header.Get("X-Username")
+	users, _ := models.GetAllUsers(h.db)
+	for _, u := range users {
+		if u.ID == id && u.Username == currentUsername {
+			templates.AdminPage(users, currentUsername, "Cannot change your own admin status").Render(r.Context(), w)
+			return
+		}
+	}
+
+	// Find the target user and toggle
+	for _, u := range users {
+		if u.ID == id {
+			if err := models.SetAdmin(h.db, id, !u.IsAdmin); err != nil {
+				log.Printf("Error toggling admin: %v", err)
+				http.Error(w, "Failed to update user", http.StatusInternalServerError)
+				return
+			}
+			break
+		}
 	}
 
 	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)

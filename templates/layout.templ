@@ -1,6 +1,6 @@
 package templates
 
-templ Layout(title string, username string) {
+templ Layout(title string, username string, isAdmin bool) {
 	<!DOCTYPE html>
 	<html lang="en" class="dark">
 		<head>
@@ -24,7 +24,9 @@ templ Layout(title string, username string) {
 						<a href="/books" class="text-sm text-gray-300 hover:text-white">Books</a>
 					</div>
 					<div class="flex items-center gap-4">
-						<a href="/admin/users" class="text-sm text-gray-300 hover:text-white">Users</a>
+						if isAdmin {
+							<a href="/admin/users" class="text-sm text-gray-300 hover:text-white">Users</a>
+						}
 						<span class="text-sm text-gray-400">{ username }</span>
 						<a href="/logout" class="text-sm text-red-400 hover:text-red-300">Logout</a>
 					</div>
