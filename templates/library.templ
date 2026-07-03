@@ -1,0 +1,242 @@
+package templates
+
+import "fmt"
+import "github.com/aleksclark/goshelf/readarr"
+
+templ AuthorBooksPage(books []BookDisplayData, authorName string, username string, isAdmin bool) {
+	@Layout(authorName, username, isAdmin) {
+		<div class="mb-4">
+			<a href="/" class="text-indigo-400 hover:text-indigo-300 text-sm">&larr; All Authors</a>
+		</div>
+		<div class="mb-6">
+			<h1 class="text-2xl font-bold">{ authorName }</h1>
+			<p class="text-sm text-gray-400 mt-1">{ fmt.Sprintf("%d books", len(books)) }</p>
+		</div>
+		<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+			for _, book := range books {
+				@BookCard(book)
+			}
+		</div>
+	}
+}
+
+templ SeriesBooksPage(books []BookDisplayData, seriesName string, username string, isAdmin bool) {
+	@Layout(seriesName, username, isAdmin) {
+		<div class="mb-4">
+			<a href="/series" class="text-indigo-400 hover:text-indigo-300 text-sm">&larr; All Series</a>
+		</div>
+		<div class="mb-6">
+			<h1 class="text-2xl font-bold">{ seriesName }</h1>
+			<p class="text-sm text-gray-400 mt-1">{ fmt.Sprintf("%d books", len(books)) }</p>
+		</div>
+		<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+			for _, book := range books {
+				@BookCard(book)
+			}
+		</div>
+	}
+}
+
+templ BooksPage(books []BookDisplayData, username string, isAdmin bool, query string, sortBy string, page int, totalPages int) {
+	@Layout("All Books", username, isAdmin) {
+		<div class="mb-6">
+			<h1 class="text-2xl font-bold mb-4">All Books</h1>
+			<div class="flex flex-col sm:flex-row gap-4">
+				<div class="flex-1">
+					<input
+						type="text"
+						name="q"
+						value={ query }
+						placeholder="Search books..."
+						hx-get="/books"
+						hx-trigger="input changed delay:300ms, keyup[key=='Enter']"
+						hx-target="#content-grid"
+						hx-include="[name='sort']"
+						class="w-full px-4 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+					/>
+				</div>
+				<select
+					name="sort"
+					hx-get="/books"
+					hx-trigger="change"
+					hx-target="#content-grid"
+					hx-include="[name='q']"
+					class="px-4 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white"
+				>
+					<option value="title" selected?={ sortBy == "" || sortBy == "title" }>Title</option>
+					<option value="author" selected?={ sortBy == "author" }>Author</option>
+					<option value="added" selected?={ sortBy == "added" }>Recently Added</option>
+				</select>
+			</div>
+		</div>
+		<div id="content-grid">
+			@BookGridWithPagination(books, page, totalPages, query, sortBy)
+		</div>
+	}
+}
+
+templ SeriesListPage(series []readarr.SeriesInfo, username string, isAdmin bool, query string, page int, totalPages int) {
+	@Layout("Series", username, isAdmin) {
+		<div class="mb-6">
+			<h1 class="text-2xl font-bold mb-4">Series</h1>
+			<div class="flex flex-col sm:flex-row gap-4">
+				<div class="flex-1">
+					<input
+						type="text"
+						name="q"
+						value={ query }
+						placeholder="Search series..."
+						hx-get="/series"
+						hx-trigger="input changed delay:300ms, keyup[key=='Enter']"
+						hx-target="#content-grid"
+						class="w-full px-4 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+					/>
+				</div>
+			</div>
+		</div>
+		<div id="content-grid">
+			@SeriesGridWithPagination(series, page, totalPages, query)
+		</div>
+	}
+}
+
+templ SeriesGridWithPagination(series []readarr.SeriesInfo, page int, totalPages int, query string) {
+	if len(series) == 0 {
+		<div class="text-center text-gray-400 py-12">
+			<p class="text-lg">No series found</p>
+		</div>
+	} else {
+		<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+			for _, s := range series {
+				@SeriesCard(s)
+			}
+		</div>
+		if totalPages > 1 {
+			@Pagination(page, totalPages, fmt.Sprintf("/series?q=%s", query), fmt.Sprintf("/series?q=%s", query))
+		}
+	}
+}
+
+templ SeriesCard(s readarr.SeriesInfo) {
+	<a
+		href={ templ.SafeURL(fmt.Sprintf("/series/%s", s.Slug)) }
+		class="group bg-gray-800 rounded-lg overflow-hidden shadow-lg hover:shadow-xl hover:ring-2 hover:ring-indigo-500 transition-all duration-200 hover:-translate-y-1"
+	>
+		<div class="aspect-square bg-gray-700 overflow-hidden">
+			if s.HasCover {
+				<img
+					src={ fmt.Sprintf("/covers/%d", s.FirstBook) }
+					alt={ s.Name }
+					class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+					loading="lazy"
+				/>
+			} else {
+				<div class="flex items-center justify-center h-full text-gray-500">
+					<svg class="w-16 h-16" fill="currentColor" viewBox="0 0 24 24">
+						<path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/>
+					</svg>
+				</div>
+			}
+		</div>
+		<div class="p-3">
+			<h3 class="font-medium text-sm text-white truncate" title={ s.Name }>{ s.Name }</h3>
+			<p class="text-xs text-gray-400 mt-1">{ fmt.Sprintf("%d books", s.BookCount) }</p>
+		</div>
+	</a>
+}
+
+templ BookGridWithPagination(books []BookDisplayData, page int, totalPages int, query string, sortBy string) {
+	if len(books) == 0 {
+		<div class="text-center text-gray-400 py-12">
+			<p class="text-lg">No audiobooks found</p>
+		</div>
+	} else {
+		<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+			for _, book := range books {
+				@BookCard(book)
+			}
+		</div>
+		if totalPages > 1 {
+			@Pagination(page, totalPages, fmt.Sprintf("/books?q=%s&sort=%s", query, sortBy), fmt.Sprintf("/books?q=%s&sort=%s", query, sortBy))
+		}
+	}
+}
+
+templ BookCard(book BookDisplayData) {
+	<div class="group bg-gray-800 rounded-lg overflow-hidden shadow-lg hover:shadow-xl hover:ring-2 hover:ring-indigo-500 transition-all duration-200 hover:-translate-y-1">
+		<a href={ templ.SafeURL(fmt.Sprintf("/books/%d", book.ID)) }>
+			<div class="aspect-square bg-gray-700 overflow-hidden">
+				if book.HasCover {
+					<img
+						src={ fmt.Sprintf("/covers/%d", book.ID) }
+						alt={ book.Title }
+						class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+						loading="lazy"
+					/>
+				} else {
+					@PlaceholderCover(book.Title)
+				}
+			</div>
+		</a>
+		<div class="p-3">
+			<a href={ templ.SafeURL(fmt.Sprintf("/books/%d", book.ID)) }>
+				<h3 class="font-medium text-sm text-white truncate hover:text-indigo-300" title={ book.Title }>{ book.Title }</h3>
+			</a>
+			if book.AuthorID > 0 {
+				<a href={ templ.SafeURL(fmt.Sprintf("/authors/%d", book.AuthorID)) } class="block">
+					<p class="text-xs text-gray-400 truncate mt-1 hover:text-indigo-300" title={ book.Author }>{ book.Author }</p>
+				</a>
+			} else {
+				<p class="text-xs text-gray-400 truncate mt-1" title={ book.Author }>{ book.Author }</p>
+			}
+			if book.SeriesTitle != "" && book.SeriesSlug != "" {
+				<a href={ templ.SafeURL(fmt.Sprintf("/series/%s", book.SeriesSlug)) } class="block">
+					<p class="text-xs text-indigo-400 truncate mt-1 hover:text-indigo-200" title={ book.SeriesTitle }>{ book.SeriesTitle }</p>
+				</a>
+			} else if book.SeriesTitle != "" {
+				<p class="text-xs text-indigo-400 truncate mt-1" title={ book.SeriesTitle }>{ book.SeriesTitle }</p>
+			}
+		</div>
+	</div>
+}
+
+templ PlaceholderCover(title string) {
+	<div class="flex flex-col items-center justify-center h-full bg-gradient-to-br from-gray-700 to-gray-800 p-3">
+		<svg class="w-12 h-12 text-gray-500 mb-2" fill="currentColor" viewBox="0 0 24 24">
+			<path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/>
+		</svg>
+		<span class="text-xs text-gray-500 text-center line-clamp-2">{ title }</span>
+	</div>
+}
+
+templ Pagination(page int, totalPages int, baseURL string, htmxURL string) {
+	<div class="mt-8 flex justify-center items-center gap-2">
+		if page > 1 {
+			<a
+				href={ templ.SafeURL(fmt.Sprintf("%s&page=%d", baseURL, page-1)) }
+				hx-get={ fmt.Sprintf("%s&page=%d", htmxURL, page-1) }
+				hx-target="#content-grid"
+				class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+			>
+				&larr; Prev
+			</a>
+		} else {
+			<span class="px-4 py-2 bg-gray-800 text-gray-500 rounded-lg cursor-not-allowed">&larr; Prev</span>
+		}
+		<span class="px-4 py-2 text-gray-300">
+			Page { fmt.Sprintf("%d", page) } of { fmt.Sprintf("%d", totalPages) }
+		</span>
+		if page < totalPages {
+			<a
+				href={ templ.SafeURL(fmt.Sprintf("%s&page=%d", baseURL, page+1)) }
+				hx-get={ fmt.Sprintf("%s&page=%d", htmxURL, page+1) }
+				hx-target="#content-grid"
+				class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+			>
+				Next &rarr;
+			</a>
+		} else {
+			<span class="px-4 py-2 bg-gray-800 text-gray-500 rounded-lg cursor-not-allowed">Next &rarr;</span>
+		}
+	</div>
+}

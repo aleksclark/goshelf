@@ -1,0 +1,76 @@
+package templates
+
+import (
+	"fmt"
+	"github.com/aleksclark/goshelf/readarr"
+)
+
+templ AuthorsPage(authors []readarr.AuthorDisplay, username string, isAdmin bool, query string, page int, totalPages int) {
+	@Layout("Library", username, isAdmin) {
+		<div class="mb-6">
+			<h1 class="text-2xl font-bold mb-4">Authors</h1>
+			<div class="flex flex-col sm:flex-row gap-4">
+				<div class="flex-1">
+					<input
+						type="text"
+						name="q"
+						value={ query }
+						placeholder="Search authors or books..."
+						hx-get="/search"
+						hx-trigger="input changed delay:300ms, keyup[key=='Enter']"
+						hx-target="#content-grid"
+						class="w-full px-4 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+					/>
+				</div>
+			</div>
+		</div>
+		<div id="content-grid">
+			@AuthorGridWithPagination(authors, page, totalPages, query)
+		</div>
+	}
+}
+
+templ AuthorGridWithPagination(authors []readarr.AuthorDisplay, page int, totalPages int, query string) {
+	if len(authors) == 0 {
+		<div class="text-center text-gray-400 py-12">
+			<p class="text-lg">No authors found</p>
+		</div>
+	} else {
+		<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+			for _, author := range authors {
+				@AuthorCard(author)
+			}
+		</div>
+		if totalPages > 1 {
+			@Pagination(page, totalPages, fmt.Sprintf("/?q=%s", query), fmt.Sprintf("/search-authors?q=%s", query))
+		}
+	}
+}
+
+templ AuthorCard(author readarr.AuthorDisplay) {
+	<a
+		href={ templ.SafeURL(fmt.Sprintf("/authors/%d", author.ID)) }
+		class="group bg-gray-800 rounded-lg overflow-hidden shadow-lg hover:shadow-xl hover:ring-2 hover:ring-indigo-500 transition-all duration-200 hover:-translate-y-1"
+	>
+		<div class="aspect-square bg-gray-700 overflow-hidden">
+			if author.HasCover {
+				<img
+					src={ fmt.Sprintf("/covers/%d", author.FirstBook) }
+					alt={ author.Name }
+					class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+					loading="lazy"
+				/>
+			} else {
+				<div class="flex items-center justify-center h-full text-gray-500 text-5xl">
+					<svg class="w-16 h-16" fill="currentColor" viewBox="0 0 24 24">
+						<path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+					</svg>
+				</div>
+			}
+		</div>
+		<div class="p-3">
+			<h3 class="font-medium text-sm text-white truncate" title={ author.Name }>{ author.Name }</h3>
+			<p class="text-xs text-gray-400 mt-1">{ fmt.Sprintf("%d books", author.BookCount) }</p>
+		</div>
+	</a>
+}

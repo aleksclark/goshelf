@@ -1,0 +1,70 @@
+package templates
+
+import "fmt"
+
+templ BookDetailPage(id int, title string, author string, seriesInfo string, overview string, files []BookFile, totalSize int64, hasCover bool, username string, isAdmin bool) {
+	@Layout(title, username, isAdmin) {
+		<div class="mb-4">
+			<a href="javascript:history.back()" class="text-indigo-400 hover:text-indigo-300 text-sm">&larr; Back</a>
+		</div>
+		<div class="bg-gray-800 rounded-lg shadow-xl overflow-hidden">
+			<div class="md:flex">
+				<div class="md:w-64 md:flex-shrink-0">
+					if hasCover {
+						<img
+							src={ fmt.Sprintf("/covers/%d", id) }
+							alt={ title }
+							class="w-full h-64 md:h-full object-cover"
+						/>
+					} else {
+						<div class="w-full h-64 md:h-full flex flex-col items-center justify-center bg-gradient-to-br from-gray-700 to-gray-800">
+							<svg class="w-20 h-20 text-gray-500 mb-3" fill="currentColor" viewBox="0 0 24 24">
+								<path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/>
+							</svg>
+							<span class="text-sm text-gray-500 text-center px-4">{ title }</span>
+						</div>
+					}
+				</div>
+				<div class="p-6 flex-1">
+					<h1 class="text-2xl font-bold text-white mb-2">{ title }</h1>
+					<p class="text-lg text-gray-300 mb-1">{ author }</p>
+					if seriesInfo != "" {
+						<p class="text-sm text-indigo-400 mb-4">{ seriesInfo }</p>
+					}
+					if overview != "" {
+						<p class="text-sm text-gray-400 mb-6 leading-relaxed max-h-32 overflow-y-auto">{ overview }</p>
+					}
+					<div class="flex items-center gap-4 mb-6">
+						<span class="text-sm text-gray-400">
+							{ fmt.Sprintf("%d files", len(files)) } &middot; { formatSize(totalSize) }
+						</span>
+					</div>
+					if len(files) > 0 {
+						<a
+							href={ templ.SafeURL(fmt.Sprintf("/books/%d/download.zip", id)) }
+							class="inline-flex items-center px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors"
+						>
+							<svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+							</svg>
+							Download as ZIP
+						</a>
+					}
+				</div>
+			</div>
+		</div>
+		if len(files) > 0 {
+			<div class="mt-6 bg-gray-800 rounded-lg shadow-xl p-6">
+				<h2 class="text-lg font-semibold mb-4 text-white">Audio Files</h2>
+				<div class="space-y-2 max-h-96 overflow-y-auto">
+					for _, file := range files {
+						<div class="flex justify-between items-center py-2 px-3 bg-gray-700/50 rounded">
+							<span class="text-sm text-gray-300 truncate mr-4">{ fileBaseName(file.Path) }</span>
+							<span class="text-xs text-gray-400 whitespace-nowrap">{ formatSize(file.Size) }</span>
+						</div>
+					}
+				</div>
+			</div>
+		}
+	}
+}

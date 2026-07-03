@@ -1,0 +1,76 @@
+package templates
+
+import "github.com/aleksclark/goshelf/models"
+import "fmt"
+
+templ AdminPage(users []models.User, username string, errMsg string) {
+	@Layout("Admin - Users", username, true) {
+		<h1 class="text-2xl font-bold mb-6">User Management</h1>
+		if errMsg != "" {
+			<div class="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded mb-4">
+				{ errMsg }
+			</div>
+		}
+		<div class="bg-gray-800 rounded-lg shadow-xl p-6 mb-6">
+			<h2 class="text-lg font-semibold mb-4">Create New User</h2>
+			<form method="POST" action="/admin/users" class="flex flex-col sm:flex-row gap-3">
+				<input
+					type="text"
+					name="username"
+					placeholder="Username"
+					required
+					class="px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+				/>
+				<input
+					type="password"
+					name="password"
+					placeholder="Password"
+					required
+					class="px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+				/>
+				<button
+					type="submit"
+					class="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors"
+				>
+					Create User
+				</button>
+			</form>
+		</div>
+		<div class="bg-gray-800 rounded-lg shadow-xl p-6">
+			<h2 class="text-lg font-semibold mb-4">Existing Users</h2>
+			<div class="space-y-3">
+				for _, user := range users {
+					<div class="flex justify-between items-center py-3 px-4 bg-gray-700/50 rounded-lg">
+						<div class="flex items-center gap-3">
+							<span class="font-medium text-white">{ user.Username }</span>
+							if user.IsAdmin {
+								<span class="text-xs bg-indigo-600 text-white px-2 py-0.5 rounded-full">Admin</span>
+							}
+							<span class="text-xs text-gray-400">Created: { user.CreatedAt.Format("2006-01-02") }</span>
+						</div>
+						if user.Username != username {
+							<div class="flex items-center gap-2">
+								<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/admin/users/%d/toggle-admin", user.ID)) }>
+									if user.IsAdmin {
+										<button type="submit" class="text-sm text-yellow-400 hover:text-yellow-300 px-3 py-1 border border-yellow-700 rounded hover:bg-yellow-900/30 transition-colors">
+											Remove Admin
+										</button>
+									} else {
+										<button type="submit" class="text-sm text-indigo-400 hover:text-indigo-300 px-3 py-1 border border-indigo-700 rounded hover:bg-indigo-900/30 transition-colors">
+											Make Admin
+										</button>
+									}
+								</form>
+								<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/admin/users/%d/delete", user.ID)) } onsubmit="return confirm('Delete this user?')">
+									<button type="submit" class="text-sm text-red-400 hover:text-red-300 px-3 py-1 border border-red-700 rounded hover:bg-red-900/30 transition-colors">
+										Delete
+									</button>
+								</form>
+							</div>
+						}
+					</div>
+				}
+			</div>
+		</div>
+	}
+}
