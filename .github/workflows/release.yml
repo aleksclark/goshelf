@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Install templ
+        run: go install github.com/a-h/templ/cmd/templ@v0.3.1020
+
+      - name: Generate templ
+        run: templ generate
+
+      - name: Determine version
+        id: version
+        run: |
+          YEAR=$(date +%Y)
+          MONTH=$(date +%-m)
+          PREFIX="v${YEAR}.${MONTH}"
+
+          # Find the latest patch for this YYYY.M prefix
+          LATEST=$(git tag --list "${PREFIX}.*" --sort=-v:refname | head -1)
+          if [ -z "$LATEST" ]; then
+            PATCH=0
+          else
+            PATCH=$(echo "$LATEST" | sed "s/${PREFIX}\\.//")
+            PATCH=$((PATCH + 1))
+          fi
+
+          VERSION="${PREFIX}.${PATCH}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      - name: Build binaries
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          mkdir -p dist
+
+          # Linux amd64
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.Version=${VERSION}" -o dist/goshelf-linux-amd64 .
+
+          # Linux arm64
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.Version=${VERSION}" -o dist/goshelf-linux-arm64 .
+
+          # Darwin amd64
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w -X main.Version=${VERSION}" -o dist/goshelf-darwin-amd64 .
+
+          # Darwin arm64
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w -X main.Version=${VERSION}" -o dist/goshelf-darwin-arm64 .
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}
+            ghcr.io/${{ github.repository }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create Git tag
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag ${{ steps.version.outputs.version }}
+          git push origin ${{ steps.version.outputs.version }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            dist/goshelf-linux-amd64
+            dist/goshelf-linux-arm64
+            dist/goshelf-darwin-amd64
+            dist/goshelf-darwin-arm64
