@@ -36,39 +36,93 @@ func (h *Handlers) DownloadZip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify all files exist and calculate total size for Content-Length.
+	// Using zip.Store (no compression) since audio files are already compressed.
+	// This lets us pre-calculate the exact zip size and set Content-Length,
+	// which prevents Cloudflare/proxy timeout issues and lets clients show progress.
+	type validFile struct {
+		localPath string
+		entryName string
+		size      int64
+	}
+	var validFiles []validFile
+
+	for _, f := range files {
+		localPath := h.resolveFilePath(f.Path)
+		info, err := os.Stat(localPath)
+		if err != nil {
+			log.Printf("Error accessing file %s: %v", localPath, err)
+			continue
+		}
+		validFiles = append(validFiles, validFile{
+			localPath: localPath,
+			entryName: filepath.Base(f.Path),
+			size:      info.Size(),
+		})
+	}
+
+	if len(validFiles) == 0 {
+		http.Error(w, "No accessible files found", http.StatusNotFound)
+		return
+	}
+
+	// Calculate exact zip size with Store method (no compression).
+	// ZIP format per file: local file header (30 + name len) + data
+	//   + data descriptor (16) + central directory entry (46 + name len)
+	// Plus end of central directory record (22).
+	zipSize := int64(0)
+	for _, f := range validFiles {
+		nameLen := int64(len(f.entryName))
+		// Local file header: 30 bytes + filename
+		zipSize += 30 + nameLen
+		// File data (stored, no compression)
+		zipSize += f.size
+		// Data descriptor: 16 bytes (Go's zip writer always writes these)
+		zipSize += 16
+		// Central directory entry: 46 bytes + filename
+		zipSize += 46 + nameLen
+	}
+	// End of central directory record: 22 bytes
+	zipSize += 22
+
 	// Set headers for zip download
 	zipFilename := sanitizeFilename(book.Title) + ".zip"
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, zipFilename))
+	w.Header().Set("Content-Length", strconv.FormatInt(zipSize, 10))
 
-	// Stream zip directly to response
+	// Stream zip directly to response using Store (no compression)
 	zw := zip.NewWriter(w)
 	defer zw.Close()
 
-	for _, f := range files {
-		localPath := h.resolveFilePath(f.Path)
-
-		file, err := os.Open(localPath)
+	for _, f := range validFiles {
+		file, err := os.Open(f.localPath)
 		if err != nil {
-			log.Printf("Error opening file %s: %v", localPath, err)
-			continue
+			log.Printf("Error opening file %s: %v", f.localPath, err)
+			// Can't skip now - Content-Length is already sent. Abort.
+			return
 		}
 
-		// Use just the filename in the zip (strip directory path)
-		entryName := filepath.Base(f.Path)
+		// Use Store method - audio files are already compressed,
+		// Deflate just wastes CPU and adds latency/timeout risk.
+		header := &zip.FileHeader{
+			Name:   f.entryName,
+			Method: zip.Store,
+		}
+		header.UncompressedSize64 = uint64(f.size)
 
-		writer, err := zw.Create(entryName)
+		writer, err := zw.CreateHeader(header)
 		if err != nil {
 			file.Close()
-			log.Printf("Error creating zip entry %s: %v", entryName, err)
-			continue
+			log.Printf("Error creating zip entry %s: %v", f.entryName, err)
+			return
 		}
 
 		_, err = io.Copy(writer, file)
 		file.Close()
 		if err != nil {
-			log.Printf("Error writing zip entry %s: %v", entryName, err)
-			return // Can't continue if write failed
+			log.Printf("Error writing zip entry %s: %v", f.entryName, err)
+			return
 		}
 	}
 }
