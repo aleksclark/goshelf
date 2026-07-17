@@ -90,6 +90,9 @@ func (h *Handlers) DownloadZip(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, zipFilename))
 	w.Header().Set("Content-Length", strconv.FormatInt(zipSize, 10))
+	// Prevent Cloudflare/proxies from applying gzip encoding which strips Content-Length
+	w.Header().Set("Content-Encoding", "identity")
+	w.Header().Set("Cache-Control", "no-transform")
 
 	// Stream zip directly to response using Store (no compression)
 	zw := zip.NewWriter(w)

@@ -1,6 +1,8 @@
 package com.goshelf.app.data.api
 
+import android.util.Log
 import com.google.gson.Gson
+import com.google.gson.JsonSyntaxException
 import com.google.gson.reflect.TypeToken
 import com.goshelf.app.data.repository.SettingsRepository
 import okhttp3.FormBody
@@ -10,31 +12,31 @@ import java.io.IOException
 import java.io.InputStream
 
 data class BookListItem(
-    val id: Int,
-    val title: String,
-    val author: String,
-    val authorId: Int,
-    val series: String?,
-    val fileCount: Int,
-    val totalSize: Long,
-    val hasCover: Boolean
+    val id: Int = 0,
+    val title: String = "",
+    val author: String = "",
+    val authorId: Int = 0,
+    val series: String? = null,
+    val fileCount: Int = 0,
+    val totalSize: Long = 0,
+    val hasCover: Boolean = false
 )
 
 data class BookFileInfo(
-    val name: String,
-    val size: Long
+    val name: String = "",
+    val size: Long = 0
 )
 
 data class BookDetail(
-    val id: Int,
-    val title: String,
-    val author: String,
-    val authorId: Int,
-    val series: String?,
-    val overview: String?,
-    val hasCover: Boolean,
-    val files: List<BookFileInfo>,
-    val totalSize: Long
+    val id: Int = 0,
+    val title: String = "",
+    val author: String = "",
+    val authorId: Int = 0,
+    val series: String? = null,
+    val overview: String? = null,
+    val hasCover: Boolean = false,
+    val files: List<BookFileInfo> = emptyList(),
+    val totalSize: Long = 0
 )
 
 data class LoginResult(
@@ -48,6 +50,10 @@ class GoShelfApi(
     private val settingsRepository: SettingsRepository
 ) {
     private val gson = Gson()
+
+    companion object {
+        private const val TAG = "GoShelfApi"
+    }
 
     private fun baseUrl(): String = settingsRepository.getServerUrl()
 
@@ -110,8 +116,21 @@ class GoShelfApi(
         }
 
         val body = response.body?.string() ?: throw IOException("Empty response")
-        val type = object : TypeToken<List<BookListItem>>() {}.type
-        return gson.fromJson(body, type)
+
+        // Guard against server returning error JSON instead of array
+        val trimmed = body.trimStart()
+        if (!trimmed.startsWith("[")) {
+            Log.w(TAG, "getBooks: unexpected response format: ${body.take(100)}")
+            throw IOException("Server error: unexpected response")
+        }
+
+        return try {
+            val type = object : TypeToken<List<BookListItem>>() {}.type
+            gson.fromJson(body, type) ?: emptyList()
+        } catch (e: JsonSyntaxException) {
+            Log.e(TAG, "getBooks: JSON parse error", e)
+            throw IOException("Failed to parse library data: ${e.message}")
+        }
     }
 
     fun getBookDetail(bookId: Int): BookDetail {
@@ -122,12 +141,23 @@ class GoShelfApi(
 
         val response = client.newCall(request).execute()
 
+        if (response.code == 303 || response.code == 302) {
+            throw IOException("Not authenticated")
+        }
+
         if (!response.isSuccessful) {
             throw IOException("Failed to fetch book detail: ${response.code}")
         }
 
         val body = response.body?.string() ?: throw IOException("Empty response")
-        return gson.fromJson(body, BookDetail::class.java)
+
+        return try {
+            gson.fromJson(body, BookDetail::class.java)
+                ?: throw IOException("Failed to parse book detail")
+        } catch (e: JsonSyntaxException) {
+            Log.e(TAG, "getBookDetail: JSON parse error", e)
+            throw IOException("Failed to parse book data: ${e.message}")
+        }
     }
 
     fun getCoverUrl(bookId: Int): String {
@@ -141,6 +171,10 @@ class GoShelfApi(
             .build()
 
         val response = client.newCall(request).execute()
+
+        if (response.code == 303 || response.code == 302) {
+            throw IOException("Not authenticated")
+        }
 
         if (!response.isSuccessful) {
             throw IOException("Failed to download: ${response.code}")
