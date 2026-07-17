@@ -4,14 +4,10 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.work.testing.WorkManagerTestInitHelper
 import com.goshelf.app.data.api.GoShelfApi
 import com.goshelf.app.data.repository.AuthRepository
 import com.goshelf.app.data.repository.BookRepository
 import com.goshelf.app.data.repository.SettingsRepository
-import com.google.gson.Gson
-import dagger.hilt.android.testing.HiltAndroidRule
-import dagger.hilt.android.testing.HiltAndroidTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -20,7 +16,6 @@ import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
-import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import kotlinx.coroutines.runBlocking
@@ -29,12 +24,8 @@ import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
-@HiltAndroidTest
 @RunWith(AndroidJUnit4::class)
 class GoShelfIntegrationTest {
-
-    @get:Rule
-    var hiltRule = HiltAndroidRule(this)
 
     private lateinit var mockServer: MockWebServer
     private lateinit var settingsRepository: SettingsRepository
@@ -89,7 +80,6 @@ class GoShelfIntegrationTest {
     @Before
     fun setup() {
         context = ApplicationProvider.getApplicationContext()
-        WorkManagerTestInitHelper.initializeTestWorkManager(context)
 
         mockServer = MockWebServer()
         mockServer.dispatcher = object : Dispatcher() {
@@ -134,7 +124,6 @@ class GoShelfIntegrationTest {
                             .setBody(okio.Buffer().write(createTestZip()))
                     }
                     request.path?.startsWith("/covers/") == true -> {
-                        // Return a tiny 1x1 JPEG
                         MockResponse()
                             .setResponseCode(200)
                             .addHeader("Content-Type", "image/jpeg")
@@ -195,11 +184,9 @@ class GoShelfIntegrationTest {
 
     @Test
     fun testFetchBooksAuthenticated() = runBlocking {
-        // First login
         val loginResult = authRepository.login("testuser", "testpass")
         assertTrue(loginResult.success)
 
-        // Then fetch books
         val books = bookRepository.getBooks()
         assertEquals(2, books.size)
         assertEquals("The Hitchhiker's Guide to the Galaxy", books[0].title)
@@ -210,7 +197,6 @@ class GoShelfIntegrationTest {
 
     @Test
     fun testFetchBooksUnauthenticated() = runBlocking {
-        // Don't login first
         try {
             bookRepository.getBooks()
             fail("Should throw IOException for unauthenticated request")
@@ -221,7 +207,6 @@ class GoShelfIntegrationTest {
 
     @Test
     fun testFetchBookDetail() = runBlocking {
-        // Login first
         authRepository.login("testuser", "testpass")
 
         val detail = bookRepository.getBookDetail(1)
@@ -235,21 +220,17 @@ class GoShelfIntegrationTest {
 
     @Test
     fun testDownloadAndExtract() = runBlocking {
-        // Login first
         authRepository.login("testuser", "testpass")
 
-        // Download ZIP
         val (inputStream, contentLength) = api.downloadZip(1)
         assertTrue("Content length should be positive", contentLength > 0)
 
-        // Read the zip and extract
         val outputDir = File(context.cacheDir, "test_extract")
         outputDir.mkdirs()
 
         val zipData = inputStream.readBytes()
         assertTrue("ZIP data should not be empty", zipData.isNotEmpty())
 
-        // Extract the zip
         val zipInputStream = java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(zipData))
         var entry = zipInputStream.nextEntry
         val extractedFiles = mutableListOf<String>()
@@ -270,22 +251,18 @@ class GoShelfIntegrationTest {
         assertTrue("Should contain chapter01.mp3", extractedFiles.contains("chapter01.mp3"))
         assertTrue("Should contain chapter02.mp3", extractedFiles.contains("chapter02.mp3"))
 
-        // Verify extracted file content
         val file1 = File(outputDir, "chapter01.mp3")
         assertTrue("Extracted file should exist", file1.exists())
         assertTrue("Extracted file should have content", file1.length() > 0)
 
-        // Cleanup
         outputDir.deleteRecursively()
     }
 
     @Test
     fun testLogout() = runBlocking {
-        // Login first
         authRepository.login("testuser", "testpass")
         assertTrue(authRepository.isLoggedIn())
 
-        // Logout
         authRepository.logout()
         assertFalse(authRepository.isLoggedIn())
     }
@@ -302,22 +279,20 @@ class GoShelfIntegrationTest {
     private fun createTestZip(): ByteArray {
         val baos = ByteArrayOutputStream()
         ZipOutputStream(baos).use { zos ->
-            // Add fake audio files
             val entry1 = ZipEntry("chapter01.mp3")
             zos.putNextEntry(entry1)
-            zos.write(ByteArray(1024) { 0xFF.toByte() }) // fake audio data
+            zos.write(ByteArray(1024) { 0xFF.toByte() })
             zos.closeEntry()
 
             val entry2 = ZipEntry("chapter02.mp3")
             zos.putNextEntry(entry2)
-            zos.write(ByteArray(1024) { 0xFE.toByte() }) // fake audio data
+            zos.write(ByteArray(1024) { 0xFE.toByte() })
             zos.closeEntry()
         }
         return baos.toByteArray()
     }
 
     private fun createTinyJpeg(): ByteArray {
-        // Minimal valid JPEG (1x1 pixel)
         return byteArrayOf(
             0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte(),
             0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
