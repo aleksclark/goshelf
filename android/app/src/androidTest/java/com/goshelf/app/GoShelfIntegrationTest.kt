@@ -10,6 +10,8 @@ import com.goshelf.app.data.repository.AuthRepository
 import com.goshelf.app.data.repository.BookRepository
 import com.goshelf.app.data.repository.SettingsRepository
 import com.google.gson.Gson
+import dagger.hilt.android.testing.HiltAndroidRule
+import dagger.hilt.android.testing.HiltAndroidTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -18,6 +20,7 @@ import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import kotlinx.coroutines.runBlocking
@@ -26,8 +29,12 @@ import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
+@HiltAndroidTest
 @RunWith(AndroidJUnit4::class)
 class GoShelfIntegrationTest {
+
+    @get:Rule
+    var hiltRule = HiltAndroidRule(this)
 
     private lateinit var mockServer: MockWebServer
     private lateinit var settingsRepository: SettingsRepository
