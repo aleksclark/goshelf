@@ -10,13 +10,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.io.IOException
 import javax.inject.Inject
 
 data class LibraryUiState(
     val books: List<BookListItem> = emptyList(),
     val isLoading: Boolean = false,
     val error: String? = null,
-    val searchQuery: String = ""
+    val searchQuery: String = "",
+    val sessionExpired: Boolean = false
 )
 
 @HiltViewModel
@@ -40,6 +42,20 @@ class LibraryViewModel @Inject constructor(
             try {
                 allBooks = bookRepository.getBooks()
                 filterBooks()
+            } catch (e: IOException) {
+                if (e.message == "Not authenticated") {
+                    // Session expired - logout and signal UI to navigate back to login
+                    authRepository.logout()
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        sessionExpired = true
+                    )
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        error = e.message ?: "Failed to load library"
+                    )
+                }
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,

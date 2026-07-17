@@ -6,7 +6,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -15,10 +15,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.goshelf.app.data.api.BookListItem
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -47,7 +49,7 @@ fun LibraryScreen(
                         viewModel.logout()
                         onLogout()
                     }) {
-                        Icon(Icons.Filled.Logout, contentDescription = "Logout")
+                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Logout")
                     }
                 }
             )
@@ -119,6 +121,8 @@ fun BookGridItem(
     coverUrl: String,
     onClick: () -> Unit
 ) {
+    val context = LocalContext.current
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -128,7 +132,10 @@ fun BookGridItem(
         Column {
             if (book.hasCover) {
                 AsyncImage(
-                    model = coverUrl,
+                    model = ImageRequest.Builder(context)
+                        .data(coverUrl)
+                        .crossfade(true)
+                        .build(),
                     contentDescription = book.title,
                     modifier = Modifier
                         .fillMaxWidth()
