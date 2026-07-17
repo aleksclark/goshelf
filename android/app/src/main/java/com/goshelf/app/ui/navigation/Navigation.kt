@@ -1,6 +1,10 @@
 package com.goshelf.app.ui.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -9,6 +13,7 @@ import androidx.navigation.navArgument
 import com.goshelf.app.ui.auth.LoginScreen
 import com.goshelf.app.ui.bookdetail.BookDetailScreen
 import com.goshelf.app.ui.library.LibraryScreen
+import com.goshelf.app.ui.library.LibraryViewModel
 import com.goshelf.app.ui.settings.SettingsScreen
 
 sealed class Screen(val route: String) {
@@ -39,6 +44,18 @@ fun GoShelfNavHost() {
         }
 
         composable(Screen.Library.route) {
+            val viewModel: LibraryViewModel = hiltViewModel()
+            val uiState by viewModel.uiState.collectAsState()
+
+            // Handle session expiration - navigate back to login
+            LaunchedEffect(uiState.sessionExpired) {
+                if (uiState.sessionExpired) {
+                    navController.navigate(Screen.Login.route) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
+            }
+
             LibraryScreen(
                 onBookClick = { bookId ->
                     navController.navigate(Screen.BookDetail.createRoute(bookId))
@@ -50,7 +67,8 @@ fun GoShelfNavHost() {
                     navController.navigate(Screen.Login.route) {
                         popUpTo(0) { inclusive = true }
                     }
-                }
+                },
+                viewModel = viewModel
             )
         }
 
