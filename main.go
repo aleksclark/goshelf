@@ -54,6 +54,10 @@ func main() {
 	mux.HandleFunc("GET /search", h.RequireAuth(h.Search))
 	mux.HandleFunc("GET /search-authors", h.RequireAuth(h.SearchAuthors))
 
+	// JSON API (for mobile apps)
+	mux.HandleFunc("GET /api/books", h.RequireAuth(h.APIBooks))
+	mux.HandleFunc("GET /api/books/{id}", h.RequireAuth(h.APIBookDetailJSON))
+
 	// Cover proxy
 	mux.HandleFunc("GET /covers/{id}", h.RequireAuth(h.CoverProxy))
 

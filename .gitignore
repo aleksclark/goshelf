@@ -1,4 +1,4 @@
-goshelf
+/goshelf
 goshelf.db
 *.db-journal
 *.db-wal
