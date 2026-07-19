@@ -13,8 +13,8 @@ android {
         applicationId = "com.goshelf.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "com.goshelf.app.PlainTestRunner"
     }
@@ -49,17 +49,21 @@ android {
 }
 
 dependencies {
-    // Compose BOM
+    // Compose BOM — pins ALL Compose artifacts to compatible versions
     val composeBom = platform("androidx.compose:compose-bom:2024.01.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)
 
-    // Compose UI
+    // Compose UI (versions managed by BOM)
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    // Explicitly pin animation-core to match BOM — prevents transitive upgrades
+    implementation("androidx.compose.animation:animation-core")
+
+    // AndroidX Compose integrations
     implementation("androidx.activity:activity-compose:1.8.2")
     implementation("androidx.navigation:navigation-compose:2.7.6")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
@@ -102,6 +106,18 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+}
+
+// Force consistent Compose versions — prevent ANY transitive dependency from
+// upgrading Material3 or animation-core beyond what the BOM specifies
+configurations.all {
+    resolutionStrategy {
+        // These must stay aligned with BOM 2024.01.00
+        force("androidx.compose.animation:animation-core:1.6.0")
+        force("androidx.compose.animation:animation-core-android:1.6.0")
+        force("androidx.compose.material3:material3:1.1.2")
+        force("androidx.compose.material3:material3-android:1.1.2")
+    }
 }
 
 kapt {
