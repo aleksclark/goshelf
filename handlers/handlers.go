@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/aleksclark/goshelf/models"
 	"github.com/aleksclark/goshelf/readarr"
@@ -39,12 +40,26 @@ func (h *Handlers) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 		// Check session cookie
 		cookie, err := r.Cookie("session")
 		if err != nil {
+			// For API routes, return JSON error instead of redirect
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte(`{"error":"not authenticated"}`))
+				return
+			}
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
 
 		user, err := models.GetUserBySession(h.db, cookie.Value)
 		if err != nil {
+			// For API routes, return JSON error instead of redirect
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte(`{"error":"session expired"}`))
+				return
+			}
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
