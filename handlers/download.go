@@ -112,18 +112,38 @@ func calculateZipSize(files []validFile) int64 {
 }
 
 // getBookValidFiles retrieves and validates files for a book.
-func (h *Handlers) getBookValidFiles(id int) ([]validFile, error) {
+// It verifies each file is actually readable (not just stat-able) to catch
+// MooseFS chunk loss / I/O errors before attempting to build a ZIP.
+// Returns valid files, number of skipped files, and any error.
+func (h *Handlers) getBookValidFiles(id int) ([]validFile, int, error) {
 	files, err := h.client.GetBookFiles(id)
 	if err != nil || len(files) == 0 {
-		return nil, fmt.Errorf("no files found for book %d: %v", id, err)
+		return nil, 0, fmt.Errorf("no files found for book %d: %v", id, err)
 	}
 
 	var result []validFile
+	var skipped int
 	for _, f := range files {
 		localPath := h.resolveFilePath(f.Path)
 		info, err := os.Stat(localPath)
 		if err != nil {
-			log.Printf("Error accessing file %s: %v", localPath, err)
+			log.Printf("Skipping inaccessible file %s: %v", localPath, err)
+			skipped++
+			continue
+		}
+		// Verify file is actually readable (catches MooseFS unrecoverable chunks)
+		fp, err := os.Open(localPath)
+		if err != nil {
+			log.Printf("Skipping unopenable file %s: %v", localPath, err)
+			skipped++
+			continue
+		}
+		buf := make([]byte, 1)
+		_, err = fp.Read(buf)
+		fp.Close()
+		if err != nil && err != io.EOF {
+			log.Printf("Skipping unreadable file %s: %v", localPath, err)
+			skipped++
 			continue
 		}
 		result = append(result, validFile{
@@ -133,7 +153,10 @@ func (h *Handlers) getBookValidFiles(id int) ([]validFile, error) {
 			modTime:   info.ModTime(),
 		})
 	}
-	return result, nil
+	if skipped > 0 {
+		log.Printf("Book %d: skipped %d unreadable files, %d files available", id, skipped, len(result))
+	}
+	return result, skipped, nil
 }
 
 // buildZipFile creates a ZIP temp file with all book files using Store method.
@@ -193,7 +216,7 @@ func (h *Handlers) DownloadZipResumable(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Get and validate book files
-	validFiles, err := h.getBookValidFiles(id)
+	validFiles, _, err := h.getBookValidFiles(id)
 	if err != nil || len(validFiles) == 0 {
 		log.Printf("Error fetching files for book %d: %v", id, err)
 		http.Error(w, "No accessible files found", http.StatusNotFound)
@@ -288,7 +311,7 @@ func (h *Handlers) APIDownloadInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get and validate files
-	validFiles, err := h.getBookValidFiles(id)
+	validFiles, skipped, err := h.getBookValidFiles(id)
 	if err != nil || len(validFiles) == 0 {
 		log.Printf("API: Error fetching files for book %d: %v", id, err)
 		http.Error(w, `{"error":"No accessible files found"}`, http.StatusNotFound)
@@ -301,13 +324,17 @@ func (h *Handlers) APIDownloadInfo(w http.ResponseWriter, r *http.Request) {
 	filename := sanitizeFilename(book.Title) + ".zip"
 
 	resp := struct {
-		TotalSize int64  `json:"totalSize"`
-		ETag      string `json:"etag"`
-		Filename  string `json:"filename"`
+		TotalSize    int64  `json:"totalSize"`
+		ETag         string `json:"etag"`
+		Filename     string `json:"filename"`
+		FileCount    int    `json:"fileCount"`
+		SkippedFiles int    `json:"skippedFiles,omitempty"`
 	}{
-		TotalSize: zipSize,
-		ETag:      `"` + hash + `"`,
-		Filename:  filename,
+		TotalSize:    zipSize,
+		ETag:         `"` + hash + `"`,
+		Filename:     filename,
+		FileCount:    len(validFiles),
+		SkippedFiles: skipped,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
