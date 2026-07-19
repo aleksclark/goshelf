@@ -202,20 +202,36 @@ func isFileReadable(path string) bool {
 }
 
 // buildZipFile creates a ZIP temp file with all book files using Store method.
-func buildZipFile(path string, files []validFile) error {
+// Files that fail to read fully are skipped — the ZIP will contain only successfully
+// copied files. Returns the list of files actually included and any fatal error.
+func buildZipFile(path string, files []validFile) ([]validFile, error) {
+	// First pass: verify each file is fully readable (avoid corrupt ZIP entries)
+	var verified []validFile
+	for _, f := range files {
+		if isFileFullyReadable(f.localPath, f.size) {
+			verified = append(verified, f)
+		} else {
+			log.Printf("ZIP build: skipping %s (cannot read full file)", f.entryName)
+		}
+	}
+	if len(verified) == 0 {
+		return nil, fmt.Errorf("no files could be read")
+	}
+
+	// Second pass: build the ZIP with verified files only
 	tmpFile, err := os.Create(path)
 	if err != nil {
-		return fmt.Errorf("creating temp file: %w", err)
+		return nil, fmt.Errorf("creating temp file: %w", err)
 	}
 	defer tmpFile.Close()
 
 	zw := zip.NewWriter(tmpFile)
 	defer zw.Close()
 
-	for _, f := range files {
+	for _, f := range verified {
 		file, err := os.Open(f.localPath)
 		if err != nil {
-			return fmt.Errorf("opening %s: %w", f.localPath, err)
+			return nil, fmt.Errorf("opening %s: %w", f.localPath, err)
 		}
 
 		header := &zip.FileHeader{
@@ -227,16 +243,45 @@ func buildZipFile(path string, files []validFile) error {
 		writer, err := zw.CreateHeader(header)
 		if err != nil {
 			file.Close()
-			return fmt.Errorf("creating zip entry %s: %w", f.entryName, err)
+			return nil, fmt.Errorf("creating zip entry %s: %w", f.entryName, err)
 		}
 
 		_, err = io.Copy(writer, file)
 		file.Close()
 		if err != nil {
-			return fmt.Errorf("writing zip entry %s: %w", f.entryName, err)
+			return nil, fmt.Errorf("writing zip entry %s: %w", f.entryName, err)
 		}
 	}
-	return nil
+	return verified, nil
+}
+
+// isFileFullyReadable reads the entire file to verify all chunks are accessible.
+// Uses a timeout proportional to file size (minimum 10s, ~1MB/s for slow network FS).
+func isFileFullyReadable(path string, size int64) bool {
+	timeout := time.Duration(size/(1024*1024))*time.Second + 10*time.Second
+	if timeout > 2*time.Minute {
+		timeout = 2 * time.Minute
+	}
+
+	done := make(chan bool, 1)
+	go func() {
+		f, err := os.Open(path)
+		if err != nil {
+			done <- false
+			return
+		}
+		defer f.Close()
+		_, err = io.Copy(io.Discard, f)
+		done <- (err == nil)
+	}()
+
+	select {
+	case ok := <-done:
+		return ok
+	case <-time.After(timeout):
+		log.Printf("Timeout reading %s (%d MB, timeout %v)", path, size/(1024*1024), timeout)
+		return false
+	}
 }
 
 // DownloadZipResumable serves a book as a ZIP with HTTP Range request support.
@@ -275,7 +320,7 @@ func (h *Handlers) DownloadZipResumable(w http.ResponseWriter, r *http.Request) 
 		cleanupBookZips(id, hash)
 
 		log.Printf("Building ZIP for book %d (hash=%s)", id, hash)
-		if err := buildZipFile(tmpPath, validFiles); err != nil {
+		if _, err := buildZipFile(tmpPath, validFiles); err != nil {
 			log.Printf("Error building ZIP for book %d: %v", id, err)
 			http.Error(w, "Failed to build ZIP", http.StatusInternalServerError)
 			// Clean up partial file
