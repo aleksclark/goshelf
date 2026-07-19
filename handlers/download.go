@@ -121,42 +121,84 @@ func (h *Handlers) getBookValidFiles(id int) ([]validFile, int, error) {
 		return nil, 0, fmt.Errorf("no files found for book %d: %v", id, err)
 	}
 
+	// Check all files in parallel with a timeout per file
+	type fileResult struct {
+		index    int
+		valid    bool
+		info     os.FileInfo
+		path     string
+		baseName string
+	}
+
+	results := make(chan fileResult, len(files))
+	for i, f := range files {
+		go func(idx int, filePath string) {
+			localPath := h.resolveFilePath(filePath)
+			info, err := os.Stat(localPath)
+			if err != nil {
+				results <- fileResult{index: idx, valid: false}
+				return
+			}
+			if !isFileReadable(localPath) {
+				results <- fileResult{index: idx, valid: false, path: localPath}
+				return
+			}
+			results <- fileResult{
+				index:    idx,
+				valid:    true,
+				info:     info,
+				path:     localPath,
+				baseName: filepath.Base(filePath),
+			}
+		}(i, f.Path)
+	}
+
 	var result []validFile
 	var skipped int
-	for _, f := range files {
-		localPath := h.resolveFilePath(f.Path)
-		info, err := os.Stat(localPath)
-		if err != nil {
-			log.Printf("Skipping inaccessible file %s: %v", localPath, err)
+	for range files {
+		r := <-results
+		if r.valid {
+			result = append(result, validFile{
+				localPath: r.path,
+				entryName: r.baseName,
+				size:      r.info.Size(),
+				modTime:   r.info.ModTime(),
+			})
+		} else {
+			if r.path != "" {
+				log.Printf("Skipping unreadable file %s (read timeout or I/O error)", r.path)
+			}
 			skipped++
-			continue
 		}
-		// Verify file is actually readable (catches MooseFS unrecoverable chunks)
-		fp, err := os.Open(localPath)
-		if err != nil {
-			log.Printf("Skipping unopenable file %s: %v", localPath, err)
-			skipped++
-			continue
-		}
-		buf := make([]byte, 1)
-		_, err = fp.Read(buf)
-		fp.Close()
-		if err != nil && err != io.EOF {
-			log.Printf("Skipping unreadable file %s: %v", localPath, err)
-			skipped++
-			continue
-		}
-		result = append(result, validFile{
-			localPath: localPath,
-			entryName: filepath.Base(f.Path),
-			size:      info.Size(),
-			modTime:   info.ModTime(),
-		})
 	}
 	if skipped > 0 {
 		log.Printf("Book %d: skipped %d unreadable files, %d files available", id, skipped, len(result))
 	}
 	return result, skipped, nil
+}
+
+// isFileReadable tries to read 1 byte from a file with a 5-second timeout.
+// Returns false if the file can't be opened, read, or the read times out.
+func isFileReadable(path string) bool {
+	done := make(chan bool, 1)
+	go func() {
+		fp, err := os.Open(path)
+		if err != nil {
+			done <- false
+			return
+		}
+		buf := make([]byte, 1)
+		_, err = fp.Read(buf)
+		fp.Close()
+		done <- (err == nil || err == io.EOF)
+	}()
+
+	select {
+	case readable := <-done:
+		return readable
+	case <-time.After(5 * time.Second):
+		return false
+	}
 }
 
 // buildZipFile creates a ZIP temp file with all book files using Store method.
