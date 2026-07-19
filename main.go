@@ -33,6 +33,9 @@ func main() {
 	// Initialize handlers
 	h := handlers.New(db, client, mediaPath)
 
+	// Start background cleanup of stale temp ZIP files
+	handlers.StartZipCleanup()
+
 	// Setup routes using Go 1.22+ enhanced routing
 	mux := http.NewServeMux()
 
@@ -48,7 +51,8 @@ func main() {
 	mux.HandleFunc("GET /authors/{id}", h.RequireAuth(h.AuthorBooks))
 	mux.HandleFunc("GET /books", h.RequireAuth(h.AllBooks))
 	mux.HandleFunc("GET /books/{id}", h.RequireAuth(h.BookDetail))
-	mux.HandleFunc("GET /books/{id}/download.zip", h.RequireAuth(h.DownloadZip))
+	mux.HandleFunc("GET /books/{id}/download.zip", h.RequireAuth(h.DownloadZipResumable))
+	mux.HandleFunc("GET /books/{id}/download-stream.zip", h.RequireAuth(h.DownloadZip))
 	mux.HandleFunc("GET /series", h.RequireAuth(h.SeriesList))
 	mux.HandleFunc("GET /series/{slug}", h.RequireAuth(h.SeriesBooks))
 	mux.HandleFunc("GET /search", h.RequireAuth(h.Search))
@@ -57,6 +61,7 @@ func main() {
 	// JSON API (for mobile apps)
 	mux.HandleFunc("GET /api/books", h.RequireAuth(h.APIBooks))
 	mux.HandleFunc("GET /api/books/{id}", h.RequireAuth(h.APIBookDetailJSON))
+	mux.HandleFunc("GET /api/books/{id}/download-info", h.RequireAuth(h.APIDownloadInfo))
 
 	// Cover proxy
 	mux.HandleFunc("GET /covers/{id}", h.RequireAuth(h.CoverProxy))

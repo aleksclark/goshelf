@@ -10,6 +10,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
 import java.io.InputStream
+import java.util.concurrent.TimeUnit
 
 data class BookListItem(
     val id: Int = 0,
@@ -45,6 +46,12 @@ data class LoginResult(
     val error: String? = null
 )
 
+data class DownloadInfo(
+    val totalSize: Long,
+    val etag: String,
+    val filename: String
+)
+
 class GoShelfApi(
     private val client: OkHttpClient,
     private val settingsRepository: SettingsRepository
@@ -53,6 +60,17 @@ class GoShelfApi(
 
     companion object {
         private const val TAG = "GoShelfApi"
+        private const val DOWNLOAD_READ_TIMEOUT_MINUTES = 5L
+    }
+
+    /**
+     * A client with extended read timeout for download operations.
+     */
+    private val downloadClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .readTimeout(DOWNLOAD_READ_TIMEOUT_MINUTES, TimeUnit.MINUTES)
+            .writeTimeout(DOWNLOAD_READ_TIMEOUT_MINUTES, TimeUnit.MINUTES)
+            .build()
     }
 
     private fun baseUrl(): String = settingsRepository.getServerUrl()
@@ -164,9 +182,12 @@ class GoShelfApi(
         return "${baseUrl()}/covers/$bookId"
     }
 
-    fun downloadZip(bookId: Int): Pair<InputStream, Long> {
+    /**
+     * Gets download metadata (size, etag, filename) without downloading the file.
+     */
+    fun getDownloadInfo(bookId: Int): DownloadInfo {
         val request = Request.Builder()
-            .url("${baseUrl()}/books/$bookId/download.zip")
+            .url("${baseUrl()}/api/books/$bookId/download-info")
             .get()
             .build()
 
@@ -177,11 +198,55 @@ class GoShelfApi(
         }
 
         if (!response.isSuccessful) {
+            throw IOException("Failed to get download info: ${response.code}")
+        }
+
+        val body = response.body?.string() ?: throw IOException("Empty response")
+
+        return try {
+            gson.fromJson(body, DownloadInfo::class.java)
+                ?: throw IOException("Failed to parse download info")
+        } catch (e: JsonSyntaxException) {
+            Log.e(TAG, "getDownloadInfo: JSON parse error", e)
+            throw IOException("Failed to parse download info: ${e.message}")
+        }
+    }
+
+    /**
+     * Downloads the ZIP file for a book starting from [rangeStart] byte offset.
+     * Uses Range header for resume support.
+     * Returns the InputStream and the content length of this response segment.
+     */
+    fun downloadZipRange(bookId: Int, rangeStart: Long): Pair<InputStream, Long> {
+        val requestBuilder = Request.Builder()
+            .url("${baseUrl()}/books/$bookId/download.zip")
+            .get()
+
+        if (rangeStart > 0) {
+            requestBuilder.addHeader("Range", "bytes=$rangeStart-")
+        }
+
+        val request = requestBuilder.build()
+        val response = downloadClient.newCall(request).execute()
+
+        if (response.code == 303 || response.code == 302) {
+            throw IOException("Not authenticated")
+        }
+
+        // 200 = full content, 206 = partial content (range request honored)
+        if (!response.isSuccessful && response.code != 206) {
             throw IOException("Failed to download: ${response.code}")
         }
 
         val body = response.body ?: throw IOException("Empty response body")
         val contentLength = body.contentLength()
-        return Pair(body.byteStream(), contentLength)
+        return Pair(body.byteStream(), if (contentLength >= 0) contentLength else 0L)
+    }
+
+    /**
+     * Legacy download method without range support (kept for compatibility).
+     */
+    fun downloadZip(bookId: Int): Pair<InputStream, Long> {
+        return downloadZipRange(bookId, 0)
     }
 }
