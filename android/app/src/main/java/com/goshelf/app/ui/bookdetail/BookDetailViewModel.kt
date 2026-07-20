@@ -113,6 +113,13 @@ class BookDetailViewModel @Inject constructor(
     fun startDownload(bookId: Int, bookTitle: String) {
         val downloadDir = settingsRepository.getDownloadDirectory()
 
+        if (downloadDir.isEmpty()) {
+            _uiState.value = _uiState.value.copy(
+                error = "No download folder selected. Please choose one in Settings."
+            )
+            return
+        }
+
         val inputData = Data.Builder()
             .putInt(DownloadWorker.KEY_BOOK_ID, bookId)
             .putString(DownloadWorker.KEY_BOOK_TITLE, bookTitle)

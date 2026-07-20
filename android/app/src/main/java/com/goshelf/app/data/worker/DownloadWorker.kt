@@ -2,8 +2,10 @@ package com.goshelf.app.data.worker
 
 import android.content.Context
 import android.content.pm.ServiceInfo
+import android.net.Uri
 import android.os.Build
 import android.util.Log
+import androidx.documentfile.provider.DocumentFile
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
@@ -17,7 +19,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 import java.io.RandomAccessFile
 
@@ -27,7 +28,7 @@ data class DownloadMetadata(
     val etag: String,
     val totalSize: Long,
     val bytesDownloaded: Long,
-    val outputDir: String,
+    val outputDirUri: String,
     val tempFile: String
 )
 
@@ -102,11 +103,20 @@ class DownloadWorker @AssistedInject constructor(
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val bookId = inputData.getInt(KEY_BOOK_ID, -1)
         val bookTitle = inputData.getString(KEY_BOOK_TITLE) ?: "Unknown"
-        val downloadDir = inputData.getString(KEY_DOWNLOAD_DIR)
-            ?: return@withContext Result.failure(workDataOf(KEY_STATUS_MESSAGE to "No download directory specified"))
+        val downloadDirUri = inputData.getString(KEY_DOWNLOAD_DIR)
+            ?: return@withContext Result.failure(workDataOf(KEY_STATUS_MESSAGE to "No download directory selected. Please choose a folder in Settings."))
 
         if (bookId == -1) {
             return@withContext Result.failure(workDataOf(KEY_STATUS_MESSAGE to "Invalid book ID"))
+        }
+
+        // Verify we still have permission to the output directory
+        val outputTreeUri = Uri.parse(downloadDirUri)
+        val treeDoc = DocumentFile.fromTreeUri(applicationContext, outputTreeUri)
+        if (treeDoc == null || !treeDoc.canWrite()) {
+            return@withContext Result.failure(workDataOf(
+                KEY_STATUS_MESSAGE to "Cannot write to download folder. Please re-select in Settings."
+            ))
         }
 
         try {
@@ -148,16 +158,13 @@ class DownloadWorker @AssistedInject constructor(
             }
 
             // Step 3: Save metadata
-            val sanitizedTitle = bookTitle.replace(Regex("[^a-zA-Z0-9\\s\\-_]"), "").trim()
-            val outputDir = File(downloadDir, sanitizedTitle)
-
             val metadata = DownloadMetadata(
                 bookId = bookId,
                 bookTitle = bookTitle,
                 etag = downloadInfo.etag,
                 totalSize = downloadInfo.totalSize,
                 bytesDownloaded = bytesDownloaded,
-                outputDir = outputDir.absolutePath,
+                outputDirUri = downloadDirUri,
                 tempFile = partFile.absolutePath
             )
             saveMetadata(metadata)
@@ -183,7 +190,7 @@ class DownloadWorker @AssistedInject constructor(
                 return@withContext Result.retry()
             }
 
-            // Step 5: Extract ZIP
+            // Step 5: Extract ZIP to SAF directory
             setProgress(workDataOf(
                 KEY_PROGRESS to 90,
                 KEY_STATUS_MESSAGE to "Extracting...",
@@ -193,8 +200,16 @@ class DownloadWorker @AssistedInject constructor(
 
             setForeground(createExtractingForegroundInfo(bookTitle))
 
-            outputDir.mkdirs()
-            extractZip(partFile, outputDir)
+            // Create book subdirectory via SAF
+            val sanitizedTitle = bookTitle.replace(Regex("[^a-zA-Z0-9\\s\\-_.'()]"), "").trim()
+            val bookDir = treeDoc.findFile(sanitizedTitle) ?: treeDoc.createDirectory(sanitizedTitle)
+            if (bookDir == null) {
+                return@withContext Result.failure(workDataOf(
+                    KEY_STATUS_MESSAGE to "Failed to create directory: $sanitizedTitle"
+                ))
+            }
+
+            extractZipToSaf(partFile, bookDir)
 
             // Step 6: Clean up temp files
             deletePartFile(bookId)
@@ -212,12 +227,12 @@ class DownloadWorker @AssistedInject constructor(
             val notificationManager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
             notificationManager.notify(
                 notificationId + 1000,
-                notificationHelper.createCompleteNotification(bookTitle, outputDir.absolutePath).build()
+                notificationHelper.createCompleteNotification(bookTitle, bookDir.uri.toString()).build()
             )
 
             return@withContext Result.success(workDataOf(
-                KEY_OUTPUT_DIR to outputDir.absolutePath,
-                KEY_STATUS_MESSAGE to "Downloaded to ${outputDir.absolutePath}"
+                KEY_OUTPUT_DIR to bookDir.uri.toString(),
+                KEY_STATUS_MESSAGE to "Downloaded: $sanitizedTitle"
             ))
 
         } catch (e: Exception) {
@@ -277,7 +292,7 @@ class DownloadWorker @AssistedInject constructor(
                     etag = loadMetadata(bookId)?.etag ?: "",
                     totalSize = totalSize,
                     bytesDownloaded = bytesDownloaded,
-                    outputDir = loadMetadata(bookId)?.outputDir ?: "",
+                    outputDirUri = loadMetadata(bookId)?.outputDirUri ?: "",
                     tempFile = partFile.absolutePath
                 ))
                 throw IOException("Download stopped by user")
@@ -400,14 +415,14 @@ class DownloadWorker @AssistedInject constructor(
         return totalWritten
     }
 
-    private fun extractZip(zipFile: File, outputDir: File) {
+    /**
+     * Extract ZIP to a SAF DocumentFile directory using ContentResolver.
+     * Uses ZipFile (random access) to correctly handle Go's data-descriptor ZIP entries.
+     */
+    private fun extractZipToSaf(zipFile: File, outputDir: DocumentFile) {
         val buffer = ByteArray(8192)
+        val contentResolver = applicationContext.contentResolver
 
-        // Use ZipFile (random access) instead of ZipInputStream because Go's
-        // archive/zip writes Store-method entries with data descriptors (size=0
-        // in local header, bit 3 set). Java's ZipInputStream doesn't handle
-        // data descriptors correctly for Store method, resulting in 0-byte files.
-        // ZipFile reads sizes from the central directory which always has correct values.
         java.util.zip.ZipFile(zipFile).use { zip ->
             val entries = zip.entries()
             while (entries.hasMoreElements()) {
@@ -417,19 +432,37 @@ class DownloadWorker @AssistedInject constructor(
 
                 val entry = entries.nextElement()
                 if (!entry.isDirectory) {
-                    // Protect against zip path traversal
                     val fileName = File(entry.name).name
-                    val outputFile = File(outputDir, fileName)
+                    // Determine MIME type for the file
+                    val mimeType = when {
+                        fileName.endsWith(".mp3", ignoreCase = true) -> "audio/mpeg"
+                        fileName.endsWith(".m4a", ignoreCase = true) -> "audio/mp4"
+                        fileName.endsWith(".m4b", ignoreCase = true) -> "audio/mp4"
+                        fileName.endsWith(".flac", ignoreCase = true) -> "audio/flac"
+                        fileName.endsWith(".ogg", ignoreCase = true) -> "audio/ogg"
+                        fileName.endsWith(".opus", ignoreCase = true) -> "audio/opus"
+                        fileName.endsWith(".wma", ignoreCase = true) -> "audio/x-ms-wma"
+                        else -> "application/octet-stream"
+                    }
 
+                    // Delete existing file if present (overwrite)
+                    outputDir.findFile(fileName)?.delete()
+
+                    // Create new file via SAF
+                    val outDoc = outputDir.createFile(mimeType, fileName)
+                        ?: throw IOException("Failed to create file: $fileName")
+
+                    // Write via ContentResolver
                     zip.getInputStream(entry).use { input ->
-                        FileOutputStream(outputFile).use { fos ->
+                        contentResolver.openOutputStream(outDoc.uri)?.use { output ->
                             var read: Int
                             while (input.read(buffer).also { read = it } != -1) {
-                                fos.write(buffer, 0, read)
+                                output.write(buffer, 0, read)
                             }
-                        }
+                        } ?: throw IOException("Failed to open output stream for: $fileName")
                     }
-                    Log.d(TAG, "Extracted: $fileName (${outputFile.length()} bytes)")
+
+                    Log.d(TAG, "Extracted: $fileName (${entry.size} bytes)")
                 }
             }
         }

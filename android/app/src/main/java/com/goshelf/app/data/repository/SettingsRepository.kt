@@ -1,8 +1,6 @@
 package com.goshelf.app.data.repository
 
 import android.content.SharedPreferences
-import android.os.Environment
-import java.io.File
 
 class SettingsRepository(private val prefs: SharedPreferences) {
 
@@ -38,16 +36,20 @@ class SettingsRepository(private val prefs: SharedPreferences) {
         prefs.edit().putString(KEY_USERNAME, username).apply()
     }
 
+    /**
+     * Returns the download directory as a SAF content URI string,
+     * or empty string if not set.
+     */
     fun getDownloadDirectory(): String {
-        val default = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
-            "GoShelf"
-        ).absolutePath
-        return prefs.getString(KEY_DOWNLOAD_DIR, default) ?: default
+        return prefs.getString(KEY_DOWNLOAD_DIR, "") ?: ""
     }
 
-    fun setDownloadDirectory(path: String) {
-        prefs.edit().putString(KEY_DOWNLOAD_DIR, path).apply()
+    fun setDownloadDirectory(uriString: String) {
+        prefs.edit().putString(KEY_DOWNLOAD_DIR, uriString).apply()
+    }
+
+    fun isDownloadDirConfigured(): Boolean {
+        return getDownloadDirectory().isNotEmpty()
     }
 
     fun isLoggedIn(): Boolean {

@@ -86,6 +86,9 @@ dependencies {
     // WorkManager
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 
+    // SAF (Storage Access Framework) document file support
+    implementation("androidx.documentfile:documentfile:1.0.1")
+
     // Encrypted SharedPreferences
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
