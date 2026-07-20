@@ -16,12 +16,10 @@ import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.RandomAccessFile
-import java.util.zip.ZipInputStream
 
 data class DownloadMetadata(
     val bookId: Int,
@@ -405,27 +403,34 @@ class DownloadWorker @AssistedInject constructor(
     private fun extractZip(zipFile: File, outputDir: File) {
         val buffer = ByteArray(8192)
 
-        ZipInputStream(BufferedInputStream(zipFile.inputStream())).use { zip ->
-            var entry = zip.nextEntry
-            while (entry != null) {
+        // Use ZipFile (random access) instead of ZipInputStream because Go's
+        // archive/zip writes Store-method entries with data descriptors (size=0
+        // in local header, bit 3 set). Java's ZipInputStream doesn't handle
+        // data descriptors correctly for Store method, resulting in 0-byte files.
+        // ZipFile reads sizes from the central directory which always has correct values.
+        java.util.zip.ZipFile(zipFile).use { zip ->
+            val entries = zip.entries()
+            while (entries.hasMoreElements()) {
                 if (isStopped) {
                     throw IOException("Extraction stopped by user")
                 }
 
+                val entry = entries.nextElement()
                 if (!entry.isDirectory) {
                     // Protect against zip path traversal
                     val fileName = File(entry.name).name
                     val outputFile = File(outputDir, fileName)
 
-                    FileOutputStream(outputFile).use { fos ->
-                        var read: Int
-                        while (zip.read(buffer).also { read = it } != -1) {
-                            fos.write(buffer, 0, read)
+                    zip.getInputStream(entry).use { input ->
+                        FileOutputStream(outputFile).use { fos ->
+                            var read: Int
+                            while (input.read(buffer).also { read = it } != -1) {
+                                fos.write(buffer, 0, read)
+                            }
                         }
                     }
+                    Log.d(TAG, "Extracted: $fileName (${outputFile.length()} bytes)")
                 }
-                zip.closeEntry()
-                entry = zip.nextEntry
             }
         }
     }
