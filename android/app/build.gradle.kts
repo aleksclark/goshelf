@@ -20,9 +20,19 @@ android {
         testInstrumentationRunner = "com.goshelf.app.PlainTestRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("goshelf-release.keystore")
+            storePassword = "goshelf2026"
+            keyAlias = "goshelf"
+            keyPassword = "goshelf2026"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

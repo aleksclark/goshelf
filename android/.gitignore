@@ -9,3 +9,5 @@
 .externalNativeBuild
 .cxx
 local.properties
+goshelf-release.keystore
+app/goshelf-release.keystore
