@@ -7,8 +7,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,12 +20,24 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.goshelf.app.data.api.APIAuthor
+import com.goshelf.app.data.api.APISeries
 import com.goshelf.app.data.api.BookListItem
+import com.goshelf.app.data.local.DownloadedBookEntity
+
+enum class LibraryTab(val title: String) {
+    AUTHORS("Authors"),
+    SERIES("Series"),
+    STARRED("Starred"),
+    DOWNLOADED("Downloaded")
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     onBookClick: (Int) -> Unit,
+    onAuthorClick: (Int) -> Unit,
+    onSeriesClick: (String) -> Unit,
     onSettingsClick: () -> Unit,
     onLogout: () -> Unit,
     viewModel: LibraryViewModel = hiltViewModel()
@@ -68,6 +79,20 @@ fun LibraryScreen(
                 )
             }
 
+            // Tab row
+            ScrollableTabRow(
+                selectedTabIndex = uiState.selectedTab.ordinal,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                LibraryTab.values().forEach { tab ->
+                    Tab(
+                        selected = uiState.selectedTab == tab,
+                        onClick = { viewModel.selectTab(tab) },
+                        text = { Text(tab.title) }
+                    )
+                }
+            }
+
             when {
                 uiState.isLoading -> {
                     Box(
@@ -88,26 +113,38 @@ fun LibraryScreen(
                                 color = MaterialTheme.colorScheme.error
                             )
                             Spacer(modifier = Modifier.height(16.dp))
-                            Button(onClick = { viewModel.loadBooks() }) {
+                            Button(onClick = { viewModel.loadCurrentTab() }) {
                                 Text("Retry")
                             }
                         }
                     }
                 }
                 else -> {
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 160.dp),
-                        contentPadding = PaddingValues(8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(uiState.books) { book ->
-                            BookGridItem(
-                                book = book,
-                                coverUrl = viewModel.getCoverUrl(book.id),
-                                onClick = { onBookClick(book.id) }
-                            )
-                        }
+                    when (uiState.selectedTab) {
+                        LibraryTab.AUTHORS -> AuthorsGrid(
+                            authors = uiState.authors,
+                            getCoverUrl = viewModel::getCoverUrl,
+                            onAuthorClick = onAuthorClick
+                        )
+                        LibraryTab.SERIES -> SeriesGrid(
+                            series = uiState.seriesList,
+                            getCoverUrl = viewModel::getCoverUrl,
+                            onSeriesClick = onSeriesClick
+                        )
+                        LibraryTab.STARRED -> StarredGrid(
+                            starredBooks = uiState.starredBooks,
+                            starredAuthors = uiState.starredAuthors,
+                            starredSeries = uiState.starredSeries,
+                            getCoverUrl = viewModel::getCoverUrl,
+                            onBookClick = onBookClick,
+                            onAuthorClick = onAuthorClick,
+                            onSeriesClick = onSeriesClick
+                        )
+                        LibraryTab.DOWNLOADED -> DownloadedGrid(
+                            downloads = uiState.downloadedBooks,
+                            getCoverUrl = viewModel::getCoverUrl,
+                            onBookClick = onBookClick
+                        )
                     }
                 }
             }
@@ -116,13 +153,34 @@ fun LibraryScreen(
 }
 
 @Composable
-fun BookGridItem(
-    book: BookListItem,
+fun AuthorsGrid(
+    authors: List<APIAuthor>,
+    getCoverUrl: (Int) -> String,
+    onAuthorClick: (Int) -> Unit
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 160.dp),
+        contentPadding = PaddingValues(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(authors) { author ->
+            AuthorGridItem(
+                author = author,
+                coverUrl = if (author.hasCover) getCoverUrl(author.firstBookId) else "",
+                onClick = { onAuthorClick(author.id) }
+            )
+        }
+    }
+}
+
+@Composable
+fun AuthorGridItem(
+    author: APIAuthor,
     coverUrl: String,
     onClick: () -> Unit
 ) {
     val context = LocalContext.current
-
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -130,13 +188,13 @@ fun BookGridItem(
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column {
-            if (book.hasCover) {
+            if (author.hasCover && coverUrl.isNotEmpty()) {
                 AsyncImage(
                     model = ImageRequest.Builder(context)
                         .data(coverUrl)
                         .crossfade(true)
                         .build(),
-                    contentDescription = book.title,
+                    contentDescription = author.name,
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(0.7f)
@@ -151,9 +209,336 @@ fun BookGridItem(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = book.title.take(2).uppercase(),
+                        text = author.name.take(2).uppercase(),
                         style = MaterialTheme.typography.headlineLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Column(modifier = Modifier.padding(8.dp)) {
+                Text(
+                    text = author.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${author.bookCount} book${if (author.bookCount != 1) "s" else ""}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SeriesGrid(
+    series: List<APISeries>,
+    getCoverUrl: (Int) -> String,
+    onSeriesClick: (String) -> Unit
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 160.dp),
+        contentPadding = PaddingValues(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(series) { s ->
+            SeriesGridItem(
+                series = s,
+                coverUrl = if (s.hasCover) getCoverUrl(s.firstBookId) else "",
+                onClick = { onSeriesClick(s.slug) }
+            )
+        }
+    }
+}
+
+@Composable
+fun SeriesGridItem(
+    series: APISeries,
+    coverUrl: String,
+    onClick: () -> Unit
+) {
+    val context = LocalContext.current
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column {
+            if (series.hasCover && coverUrl.isNotEmpty()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(coverUrl)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = series.name,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(0.7f)
+                        .clip(MaterialTheme.shapes.medium),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(0.7f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = series.name.take(2).uppercase(),
+                        style = MaterialTheme.typography.headlineLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Column(modifier = Modifier.padding(8.dp)) {
+                Text(
+                    text = series.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${series.bookCount} book${if (series.bookCount != 1) "s" else ""}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun StarredGrid(
+    starredBooks: List<BookListItem>,
+    starredAuthors: List<APIAuthor>,
+    starredSeries: List<APISeries>,
+    getCoverUrl: (Int) -> String,
+    onBookClick: (Int) -> Unit,
+    onAuthorClick: (Int) -> Unit,
+    onSeriesClick: (String) -> Unit
+) {
+    if (starredBooks.isEmpty() && starredAuthors.isEmpty() && starredSeries.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    Icons.Filled.Star,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "No starred items yet",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "Star authors, series, or books to see them here",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        return
+    }
+
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 160.dp),
+        contentPadding = PaddingValues(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        // Starred authors
+        items(starredAuthors) { author ->
+            AuthorGridItem(
+                author = author,
+                coverUrl = if (author.hasCover) getCoverUrl(author.firstBookId) else "",
+                onClick = { onAuthorClick(author.id) }
+            )
+        }
+        // Starred series
+        items(starredSeries) { s ->
+            SeriesGridItem(
+                series = s,
+                coverUrl = if (s.hasCover) getCoverUrl(s.firstBookId) else "",
+                onClick = { onSeriesClick(s.slug) }
+            )
+        }
+        // Starred books
+        items(starredBooks) { book ->
+            BookGridItem(
+                book = book,
+                coverUrl = getCoverUrl(book.id),
+                isDownloaded = false,
+                onClick = { onBookClick(book.id) }
+            )
+        }
+    }
+}
+
+@Composable
+fun DownloadedGrid(
+    downloads: List<DownloadedBookEntity>,
+    getCoverUrl: (Int) -> String,
+    onBookClick: (Int) -> Unit
+) {
+    if (downloads.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    Icons.Filled.Download,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "No downloaded books",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        return
+    }
+
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 160.dp),
+        contentPadding = PaddingValues(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(downloads) { download ->
+            DownloadedBookGridItem(
+                download = download,
+                coverUrl = getCoverUrl(download.bookId),
+                onClick = { onBookClick(download.bookId) }
+            )
+        }
+    }
+}
+
+@Composable
+fun DownloadedBookGridItem(
+    download: DownloadedBookEntity,
+    coverUrl: String,
+    onClick: () -> Unit
+) {
+    val context = LocalContext.current
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column {
+            Box {
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(coverUrl)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = download.title,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(0.7f)
+                        .clip(MaterialTheme.shapes.medium),
+                    contentScale = ContentScale.Crop
+                )
+                // Downloaded checkmark badge
+                Icon(
+                    Icons.Filled.CheckCircle,
+                    contentDescription = "Downloaded",
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp)
+                        .size(24.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+            Column(modifier = Modifier.padding(8.dp)) {
+                Text(
+                    text = download.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = download.author,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun BookGridItem(
+    book: BookListItem,
+    coverUrl: String,
+    isDownloaded: Boolean = false,
+    onClick: () -> Unit
+) {
+    val context = LocalContext.current
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column {
+            Box {
+                if (book.hasCover) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(coverUrl)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = book.title,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(0.7f)
+                            .clip(MaterialTheme.shapes.medium),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(0.7f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = book.title.take(2).uppercase(),
+                            style = MaterialTheme.typography.headlineLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                if (isDownloaded) {
+                    Icon(
+                        Icons.Filled.CheckCircle,
+                        contentDescription = "Downloaded",
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(4.dp)
+                            .size(24.dp),
+                        tint = MaterialTheme.colorScheme.primary
                     )
                 }
             }

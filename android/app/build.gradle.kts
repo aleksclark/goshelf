@@ -14,8 +14,8 @@ android {
         applicationId = "com.goshelf.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
 
         testInstrumentationRunner = "com.goshelf.app.PlainTestRunner"
     }
@@ -104,6 +104,11 @@ dependencies {
 
     // JSON
     implementation("com.google.code.gson:gson:2.11.0")
+
+    // Room
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    kapt("androidx.room:room-compiler:2.6.1")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

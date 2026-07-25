@@ -1,13 +1,16 @@
 package com.goshelf.app.ui.bookdetail
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.*
 import com.goshelf.app.data.api.BookDetail
 import com.goshelf.app.data.repository.BookRepository
 import com.goshelf.app.data.repository.SettingsRepository
+import com.goshelf.app.data.repository.StarRepository
 import com.goshelf.app.data.worker.DownloadWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -30,13 +33,16 @@ data class BookDetailUiState(
     val totalBytes: Long = 0L,
     val downloadSpeed: Long = 0L,
     val hasPartialDownload: Boolean = false,
-    val isPaused: Boolean = false
+    val isPaused: Boolean = false,
+    val isStarred: Boolean = false,
+    val isAlreadyDownloaded: Boolean = false
 )
 
 @HiltViewModel
 class BookDetailViewModel @Inject constructor(
     private val bookRepository: BookRepository,
     private val settingsRepository: SettingsRepository,
+    private val starRepository: StarRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -48,18 +54,24 @@ class BookDetailViewModel @Inject constructor(
     val uiState: StateFlow<BookDetailUiState> = _uiState.asStateFlow()
 
     private val workManager = WorkManager.getInstance(context)
+    private var currentBookId: Int = 0
 
     fun loadBook(bookId: Int) {
+        currentBookId = bookId
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             try {
                 val book = bookRepository.getBookDetail(bookId)
-                _uiState.value = _uiState.value.copy(book = book, isLoading = false)
+                val isStarred = starRepository.isStarred("book", bookId.toString())
+                val isDownloaded = starRepository.isDownloaded(bookId)
+                _uiState.value = _uiState.value.copy(
+                    book = book,
+                    isLoading = false,
+                    isStarred = isStarred,
+                    isAlreadyDownloaded = isDownloaded
+                )
 
-                // Check for existing partial download
                 checkForPartialDownload(bookId)
-
-                // Check if work is already running
                 observeExistingWork(bookId)
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
@@ -67,6 +79,34 @@ class BookDetailViewModel @Inject constructor(
                     error = e.message ?: "Failed to load book details"
                 )
             }
+        }
+    }
+
+    fun toggleStar() {
+        viewModelScope.launch {
+            val book = _uiState.value.book ?: return@launch
+            val isNowStarred = starRepository.toggleStar(
+                "book", currentBookId.toString(), book.title
+            )
+            _uiState.value = _uiState.value.copy(isStarred = isNowStarred)
+        }
+    }
+
+    fun removeDownload(bookId: Int) {
+        viewModelScope.launch {
+            val download = starRepository.getDownload(bookId)
+            if (download != null) {
+                // Try to delete the files from the device
+                try {
+                    val uri = Uri.parse(download.outputDirUri)
+                    val docFile = DocumentFile.fromTreeUri(context, uri)
+                    docFile?.delete()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to delete download files for book $bookId", e)
+                }
+            }
+            starRepository.removeDownload(bookId)
+            _uiState.value = _uiState.value.copy(isAlreadyDownloaded = false)
         }
     }
 
@@ -81,7 +121,6 @@ class BookDetailViewModel @Inject constructor(
                 isPaused = true,
                 bytesDownloaded = partFile.length()
             )
-            Log.i(TAG, "Found partial download for book $bookId: ${partFile.length()} bytes")
         }
     }
 
@@ -141,10 +180,10 @@ class BookDetailViewModel @Inject constructor(
             )
             .build()
 
-        // Use KEEP so re-tapping doesn't restart an active download
+        // Use REPLACE to allow re-download
         workManager.enqueueUniqueWork(
             "download_book_$bookId",
-            ExistingWorkPolicy.KEEP,
+            ExistingWorkPolicy.REPLACE,
             downloadRequest
         )
 
@@ -159,15 +198,12 @@ class BookDetailViewModel @Inject constructor(
     }
 
     fun resumeDownload(bookId: Int, bookTitle: String) {
-        // Resume is the same as start - the worker will detect the .download file
-        // and resume from where it left off
         startDownload(bookId, bookTitle)
     }
 
     fun cancelDownload(bookId: Int) {
         workManager.cancelUniqueWork("download_book_$bookId")
 
-        // Clean up partial files
         val downloadsDir = File(context.cacheDir, "downloads")
         File(downloadsDir, "book_${bookId}.download").delete()
         File(downloadsDir, "book_${bookId}.part").delete()
@@ -182,7 +218,6 @@ class BookDetailViewModel @Inject constructor(
     }
 
     fun pauseDownload(bookId: Int) {
-        // Cancel the work but keep partial files for resume
         workManager.cancelUniqueWork("download_book_$bookId")
 
         _uiState.value = _uiState.value.copy(
@@ -220,11 +255,25 @@ class BookDetailViewModel @Inject constructor(
                         val outputDir = workInfo.outputData.getString(DownloadWorker.KEY_OUTPUT_DIR) ?: ""
                         _uiState.value = _uiState.value.copy(
                             downloadProgress = 100,
-                            downloadStatus = "Downloaded to $outputDir",
+                            downloadStatus = "Download complete",
                             isDownloading = false,
                             isPaused = false,
-                            hasPartialDownload = false
+                            hasPartialDownload = false,
+                            isAlreadyDownloaded = true
                         )
+                        // Record the download in the database
+                        viewModelScope.launch {
+                            val book = _uiState.value.book
+                            if (book != null) {
+                                starRepository.markDownloaded(
+                                    bookId = bookId,
+                                    title = book.title,
+                                    author = book.author,
+                                    outputDirUri = outputDir,
+                                    totalSize = book.totalSize
+                                )
+                            }
+                        }
                     }
                     WorkInfo.State.FAILED -> {
                         val error = workInfo.outputData.getString(DownloadWorker.KEY_STATUS_MESSAGE) ?: "Download failed"
@@ -234,7 +283,6 @@ class BookDetailViewModel @Inject constructor(
                             isDownloading = false,
                             isPaused = false
                         )
-                        // Check if partial download exists for resume
                         checkForPartialDownload(bookId)
                     }
                     WorkInfo.State.CANCELLED -> {
@@ -243,7 +291,6 @@ class BookDetailViewModel @Inject constructor(
                             downloadStatus = "Cancelled",
                             isDownloading = false
                         )
-                        // Check if it was a pause (partial files still exist)
                         checkForPartialDownload(bookId)
                     }
                     WorkInfo.State.ENQUEUED -> {
