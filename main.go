@@ -62,6 +62,10 @@ func main() {
 	mux.HandleFunc("GET /api/books", h.RequireAuth(h.APIBooks))
 	mux.HandleFunc("GET /api/books/{id}", h.RequireAuth(h.APIBookDetailJSON))
 	mux.HandleFunc("GET /api/books/{id}/download-info", h.RequireAuth(h.APIDownloadInfo))
+	mux.HandleFunc("GET /api/authors", h.RequireAuth(h.APIAuthors))
+	mux.HandleFunc("GET /api/authors/{id}", h.RequireAuth(h.APIAuthorDetail))
+	mux.HandleFunc("GET /api/series", h.RequireAuth(h.APISeriesList))
+	mux.HandleFunc("GET /api/series/{slug}", h.RequireAuth(h.APISeriesDetail))
 
 	// Cover proxy
 	mux.HandleFunc("GET /covers/{id}", h.RequireAuth(h.CoverProxy))

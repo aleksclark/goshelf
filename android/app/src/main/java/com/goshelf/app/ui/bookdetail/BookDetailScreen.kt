@@ -4,11 +4,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.LibraryBooks
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,6 +23,8 @@ import coil.compose.AsyncImage
 fun BookDetailScreen(
     bookId: Int,
     onBack: () -> Unit,
+    onAuthorClick: (Int) -> Unit = {},
+    onSeriesClick: (String) -> Unit = {},
     viewModel: BookDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -39,7 +39,17 @@ fun BookDetailScreen(
                 title = { Text(uiState.book?.title ?: "Book Details") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { viewModel.toggleStar() }) {
+                        Icon(
+                            if (uiState.isStarred) Icons.Filled.Star else Icons.Filled.StarBorder,
+                            contentDescription = if (uiState.isStarred) "Unstar" else "Star",
+                            tint = if (uiState.isStarred) MaterialTheme.colorScheme.primary
+                                   else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             )
@@ -92,26 +102,45 @@ fun BookDetailScreen(
                         Spacer(modifier = Modifier.height(16.dp))
                     }
 
-                    // Title & Author
+                    // Title
                     Text(
                         text = book.title,
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "by ${book.author}",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Author as clickable chip
+                    AssistChip(
+                        onClick = { onAuthorClick(book.authorId) },
+                        label = { Text(book.author) },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.Person,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     )
 
-                    // Series
+                    // Series as clickable chip
                     if (!book.series.isNullOrEmpty()) {
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = book.series,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.tertiary
+                        val seriesSlug = book.series
+                            .replace(Regex("\\s*#\\d+\\.?\\d*\\s*$"), "")
+                            .lowercase()
+                            .replace(Regex("[^a-z0-9]+"), "-")
+                            .trim('-')
+                        AssistChip(
+                            onClick = { onSeriesClick(seriesSlug) },
+                            label = { Text(book.series) },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.LibraryBooks,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         )
                     }
 
@@ -173,6 +202,33 @@ fun BookDetailScreen(
                         Spacer(modifier = Modifier.height(16.dp))
                     }
 
+                    // Downloaded indicator
+                    if (uiState.isAlreadyDownloaded) {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Filled.CheckCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Downloaded to device",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
                     // Download section
                     DownloadSection(
                         uiState = uiState,
@@ -180,6 +236,22 @@ fun BookDetailScreen(
                         bookTitle = book.title,
                         viewModel = viewModel
                     )
+
+                    // Remove from device button
+                    if (uiState.isAlreadyDownloaded && !uiState.isDownloading) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = { viewModel.removeDownload(bookId) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            )
+                        ) {
+                            Icon(Icons.Filled.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Remove from device")
+                        }
+                    }
                 }
             }
         }
@@ -195,15 +267,12 @@ private fun DownloadSection(
 ) {
     when {
         uiState.isDownloading -> {
-            // Active download - show progress
             Column(modifier = Modifier.fillMaxWidth()) {
                 LinearProgressIndicator(
                     progress = { (uiState.downloadProgress / 100f).coerceIn(0f, 1f) },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-
-                // Size progress text
                 if (uiState.totalBytes > 0) {
                     Text(
                         text = "${formatFileSize(uiState.bytesDownloaded)} / ${formatFileSize(uiState.totalBytes)}",
@@ -211,25 +280,18 @@ private fun DownloadSection(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-
-                // Speed text
                 if (uiState.downloadSpeed > 0) {
                     Text(
-                        text = "${formatSpeed(uiState.downloadSpeed)}",
+                        text = formatSpeed(uiState.downloadSpeed),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-
-                // Status message
                 Text(
                     text = uiState.downloadStatus ?: "Downloading...",
                     style = MaterialTheme.typography.bodySmall
                 )
-
                 Spacer(modifier = Modifier.height(12.dp))
-
-                // Pause and Cancel buttons
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -258,7 +320,6 @@ private fun DownloadSection(
         }
 
         uiState.isPaused || uiState.hasPartialDownload -> {
-            // Paused / interrupted download - show resume
             Column(modifier = Modifier.fillMaxWidth()) {
                 if (uiState.bytesDownloaded > 0) {
                     Text(
@@ -268,7 +329,6 @@ private fun DownloadSection(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
-
                 if (uiState.downloadStatus != null && uiState.downloadStatus != "Paused") {
                     Text(
                         text = uiState.downloadStatus,
@@ -277,7 +337,6 @@ private fun DownloadSection(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
-
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -306,7 +365,6 @@ private fun DownloadSection(
         }
 
         else -> {
-            // No active download - show download button or status
             if (uiState.downloadStatus != null) {
                 Text(
                     text = uiState.downloadStatus,
@@ -325,7 +383,7 @@ private fun DownloadSection(
             ) {
                 Icon(Icons.Filled.Download, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Download & Extract")
+                Text(if (uiState.isAlreadyDownloaded) "Re-download" else "Download & Extract")
             }
         }
     }

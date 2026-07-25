@@ -3,15 +3,20 @@ package com.goshelf.app.di
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import androidx.room.Room
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import coil.ImageLoader
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.goshelf.app.data.api.GoShelfApi
+import com.goshelf.app.data.local.DownloadedBookDao
+import com.goshelf.app.data.local.GoShelfDatabase
+import com.goshelf.app.data.local.StarDao
 import com.goshelf.app.data.repository.AuthRepository
 import com.goshelf.app.data.repository.BookRepository
 import com.goshelf.app.data.repository.SettingsRepository
+import com.goshelf.app.data.repository.StarRepository
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -150,5 +155,29 @@ object AppModule {
         settingsRepository: SettingsRepository
     ): BookRepository {
         return BookRepository(goShelfApi, settingsRepository)
+    }
+
+    @Provides
+    @Singleton
+    fun provideDatabase(@ApplicationContext context: Context): GoShelfDatabase {
+        return Room.databaseBuilder(
+            context,
+            GoShelfDatabase::class.java,
+            "goshelf.db"
+        ).build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideStarDao(database: GoShelfDatabase): StarDao = database.starDao()
+
+    @Provides
+    @Singleton
+    fun provideDownloadedBookDao(database: GoShelfDatabase): DownloadedBookDao = database.downloadedBookDao()
+
+    @Provides
+    @Singleton
+    fun provideStarRepository(starDao: StarDao, downloadedBookDao: DownloadedBookDao): StarRepository {
+        return StarRepository(starDao, downloadedBookDao)
     }
 }

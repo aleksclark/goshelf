@@ -52,6 +52,33 @@ data class DownloadInfo(
     val filename: String
 )
 
+data class APIAuthor(
+    val id: Int = 0,
+    val name: String = "",
+    val bookCount: Int = 0,
+    val hasCover: Boolean = false,
+    val firstBookId: Int = 0
+)
+
+data class APISeries(
+    val name: String = "",
+    val slug: String = "",
+    val bookCount: Int = 0,
+    val hasCover: Boolean = false,
+    val firstBookId: Int = 0
+)
+
+data class AuthorDetailResponse(
+    val author: APIAuthor = APIAuthor(),
+    val series: List<APISeries> = emptyList(),
+    val books: List<BookListItem> = emptyList()
+)
+
+data class SeriesDetailResponse(
+    val name: String = "",
+    val books: List<BookListItem> = emptyList()
+)
+
 class GoShelfApi(
     private val client: OkHttpClient,
     private val settingsRepository: SettingsRepository
@@ -248,5 +275,73 @@ class GoShelfApi(
      */
     fun downloadZip(bookId: Int): Pair<InputStream, Long> {
         return downloadZipRange(bookId, 0)
+    }
+
+    fun getAuthors(): List<APIAuthor> {
+        val request = Request.Builder()
+            .url("${baseUrl()}/api/authors")
+            .get()
+            .build()
+        val response = client.newCall(request).execute()
+        if (response.code == 303 || response.code == 302) throw IOException("Not authenticated")
+        if (!response.isSuccessful) throw IOException("Failed to fetch authors: ${response.code}")
+        val body = response.body?.string() ?: throw IOException("Empty response")
+        return try {
+            val type = object : TypeToken<List<APIAuthor>>() {}.type
+            gson.fromJson(body, type) ?: emptyList()
+        } catch (e: JsonSyntaxException) {
+            throw IOException("Failed to parse authors: ${e.message}")
+        }
+    }
+
+    fun getAuthorDetail(authorId: Int): AuthorDetailResponse {
+        val request = Request.Builder()
+            .url("${baseUrl()}/api/authors/$authorId")
+            .get()
+            .build()
+        val response = client.newCall(request).execute()
+        if (response.code == 303 || response.code == 302) throw IOException("Not authenticated")
+        if (!response.isSuccessful) throw IOException("Failed to fetch author: ${response.code}")
+        val body = response.body?.string() ?: throw IOException("Empty response")
+        return try {
+            gson.fromJson(body, AuthorDetailResponse::class.java)
+                ?: throw IOException("Failed to parse author detail")
+        } catch (e: JsonSyntaxException) {
+            throw IOException("Failed to parse author data: ${e.message}")
+        }
+    }
+
+    fun getSeries(): List<APISeries> {
+        val request = Request.Builder()
+            .url("${baseUrl()}/api/series")
+            .get()
+            .build()
+        val response = client.newCall(request).execute()
+        if (response.code == 303 || response.code == 302) throw IOException("Not authenticated")
+        if (!response.isSuccessful) throw IOException("Failed to fetch series: ${response.code}")
+        val body = response.body?.string() ?: throw IOException("Empty response")
+        return try {
+            val type = object : TypeToken<List<APISeries>>() {}.type
+            gson.fromJson(body, type) ?: emptyList()
+        } catch (e: JsonSyntaxException) {
+            throw IOException("Failed to parse series: ${e.message}")
+        }
+    }
+
+    fun getSeriesDetail(slug: String): SeriesDetailResponse {
+        val request = Request.Builder()
+            .url("${baseUrl()}/api/series/$slug")
+            .get()
+            .build()
+        val response = client.newCall(request).execute()
+        if (response.code == 303 || response.code == 302) throw IOException("Not authenticated")
+        if (!response.isSuccessful) throw IOException("Failed to fetch series: ${response.code}")
+        val body = response.body?.string() ?: throw IOException("Empty response")
+        return try {
+            gson.fromJson(body, SeriesDetailResponse::class.java)
+                ?: throw IOException("Failed to parse series detail")
+        } catch (e: JsonSyntaxException) {
+            throw IOException("Failed to parse series data: ${e.message}")
+        }
     }
 }
