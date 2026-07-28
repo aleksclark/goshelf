@@ -39,6 +39,41 @@ func ParseSeriesName(seriesTitle string) string {
 	return part
 }
 
+// ParseAllSeriesNames extracts ALL series names from a seriesTitle field.
+// e.g. "Discworld - Rincewind #6; Discworld #5" -> [{"Discworld - Rincewind", 6}, {"Discworld", 5}]
+type SeriesEntry struct {
+	Name     string
+	Position float64
+}
+
+func ParseAllSeriesNames(seriesTitle string) []SeriesEntry {
+	if seriesTitle == "" {
+		return nil
+	}
+	parts := strings.Split(seriesTitle, ";")
+	entries := make([]SeriesEntry, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		pos := float64(9999)
+		name := part
+		if idx := strings.LastIndex(part, "#"); idx > 0 {
+			numStr := strings.TrimSpace(part[idx+1:])
+			var p float64
+			if _, err := fmt.Sscanf(numStr, "%f", &p); err == nil {
+				pos = p
+			}
+			name = strings.TrimSpace(part[:idx])
+		}
+		if name != "" {
+			entries = append(entries, SeriesEntry{Name: name, Position: pos})
+		}
+	}
+	return entries
+}
+
 type SeriesInfo struct {
 	Name      string
 	Slug      string
@@ -222,15 +257,15 @@ func (c *Client) fetchAll() error {
 		booksByAuth[b.AuthorID] = append(booksByAuth[b.AuthorID], *b)
 		bookByID[b.ID] = b
 
-		// Build series index from seriesTitle
-		seriesName := ParseSeriesName(b.SeriesTitle)
-		if seriesName != "" {
-			slug := SeriesSlug(seriesName)
+		// Build series index from seriesTitle - index under ALL series
+		seriesEntries := ParseAllSeriesNames(b.SeriesTitle)
+		for _, entry := range seriesEntries {
+			slug := SeriesSlug(entry.Name)
 			booksBySeries[slug] = append(booksBySeries[slug], *b)
 			if _, ok := seriesMap[slug]; !ok {
 				hasCover := len(b.Images) > 0
 				seriesMap[slug] = &SeriesInfo{
-					Name:      seriesName,
+					Name:      entry.Name,
 					Slug:      slug,
 					BookCount: 0,
 					HasCover:  hasCover,
@@ -377,15 +412,24 @@ func (c *Client) GetCachedBooksBySeries(slug string) ([]Book, string, error) {
 		return nil, "", fmt.Errorf("series not found")
 	}
 
-	// Get series name from the first book
-	seriesName := ParseSeriesName(books[0].SeriesTitle)
+	// Get series name from the series list (not from the book's primary series)
+	seriesName := ""
+	for _, si := range c.seriesList {
+		if si.Slug == slug {
+			seriesName = si.Name
+			break
+		}
+	}
+	if seriesName == "" {
+		seriesName = ParseSeriesName(books[0].SeriesTitle)
+	}
 
-	// Sort by position in series title
+	// Sort by position within THIS series
 	sorted := make([]Book, len(books))
 	copy(sorted, books)
 	sort.Slice(sorted, func(i, j int) bool {
-		pi := extractPosition(sorted[i].SeriesTitle)
-		pj := extractPosition(sorted[j].SeriesTitle)
+		pi := extractPositionForSeries(sorted[i].SeriesTitle, seriesName)
+		pj := extractPositionForSeries(sorted[j].SeriesTitle, seriesName)
 		if pi != pj {
 			return pi < pj
 		}
@@ -435,6 +479,22 @@ func extractPosition(seriesTitle string) float64 {
 		var pos float64
 		if _, err := fmt.Sscanf(numStr, "%f", &pos); err == nil {
 			return pos
+		}
+	}
+	return 9999
+}
+
+// extractPositionForSeries parses the position for a specific series from a multi-series seriesTitle.
+// e.g. extractPositionForSeries("Discworld - Rincewind #6; Discworld #5", "Discworld") -> 5
+func extractPositionForSeries(seriesTitle, targetSeries string) float64 {
+	if seriesTitle == "" {
+		return 9999
+	}
+	targetSlug := SeriesSlug(targetSeries)
+	entries := ParseAllSeriesNames(seriesTitle)
+	for _, e := range entries {
+		if SeriesSlug(e.Name) == targetSlug {
+			return e.Position
 		}
 	}
 	return 9999
