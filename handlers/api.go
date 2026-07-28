@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -362,12 +363,16 @@ func (h *Handlers) APISeriesDetail(w http.ResponseWriter, r *http.Request) {
 			authorName = b.Author.AuthorName
 		}
 
-		seriesInfo := b.SeriesTitle
-		if seriesInfo == "" && len(b.SeriesLinks) > 0 {
-			sl := b.SeriesLinks[0]
-			seriesInfo = sl.Title
-			if sl.Position != "" {
-				seriesInfo += " #" + sl.Position
+		// Show position within THIS series, not the full multi-series string
+		seriesInfo := seriesName
+		entries := readarr.ParseAllSeriesNames(b.SeriesTitle)
+		targetSlug := readarr.SeriesSlug(seriesName)
+		for _, e := range entries {
+			if readarr.SeriesSlug(e.Name) == targetSlug {
+				if e.Position < 9999 {
+					seriesInfo = fmt.Sprintf("%s #%g", e.Name, e.Position)
+				}
+				break
 			}
 		}
 
