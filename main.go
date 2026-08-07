@@ -13,9 +13,10 @@ import (
 var Version = "dev"
 
 func main() {
-	// Configuration from environment
-	readarrURL := getEnv("READARR_URL", "http://192.168.0.24:8787")
-	readarrAPIKey := getEnv("READARR_API_KEY", "124c86cb3f13445c8f20e951919fb896")
+	// Configuration from environment — no secret defaults.
+	// READARR_URL should be the durable fleet hostname (e.g. https://readarr.fleet.clark.team).
+	readarrURL := mustEnv("READARR_URL")
+	readarrAPIKey := mustEnv("READARR_API_KEY")
 	mediaPath := getEnv("MEDIA_PATH", "/audiobooks")
 	listenAddr := getEnv("LISTEN_ADDR", ":8080")
 	dbPath := getEnv("DB_PATH", "./goshelf.db")
@@ -38,6 +39,10 @@ func main() {
 
 	// Setup routes using Go 1.22+ enhanced routing
 	mux := http.NewServeMux()
+
+	// Liveness / readiness (unauthenticated; readiness checks Readarr /ping)
+	mux.HandleFunc("GET /healthz", h.Healthz)
+	mux.HandleFunc("GET /readyz", h.Readyz)
 
 	// Auth routes
 	mux.HandleFunc("GET /login", h.LoginPage)
@@ -76,7 +81,7 @@ func main() {
 	mux.HandleFunc("POST /admin/users/{id}/delete", h.RequireAdmin(h.AdminDeleteUser))
 	mux.HandleFunc("POST /admin/users/{id}/toggle-admin", h.RequireAdmin(h.AdminToggleAdmin))
 
-	log.Printf("GoShelf starting on %s", listenAddr)
+	log.Printf("GoShelf %s starting on %s", Version, listenAddr)
 	log.Printf("Readarr URL: %s", readarrURL)
 	log.Printf("Media path: %s", mediaPath)
 
@@ -90,4 +95,12 @@ func getEnv(key, fallback string) string {
 		return val
 	}
 	return fallback
+}
+
+func mustEnv(key string) string {
+	val := os.Getenv(key)
+	if val == "" {
+		log.Fatalf("required environment variable %s is not set", key)
+	}
+	return val
 }
