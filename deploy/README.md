@@ -18,7 +18,10 @@ Project-owned singleton. Canonical jobspec: `deploy/nomad/jobs/goshelf.nomad.hcl
 | Port | host static `8580` (`http`) |
 | Routes | Traefik Host `books.fleet.clark.team` \|\| `books.clark.team` (websecure + LE) |
 | DB | `/configs/goshelf/goshelf.db` on host volume `moosefs-configs` → `/mnt/moosefs/configs` |
-| Media | `/audiobooks/audiobooks` on host volume `moosefs-media` → `/mnt/moosefs/media` (ro) |
+| Media mount | host vol `moosefs-media` → container `/audiobooks` (ro); host `/mnt/moosefs/media` |
+| `MEDIA_PATH` | **`/audiobooks`** (mount root — not the `audiobooks/` leaf) |
+| `READARR_MEDIA_ROOT` | **`/media`** — Readarr path root rewritten onto `MEDIA_PATH` |
+| Path map | `/media/ebooks/…`→`/audiobooks/ebooks/…`; `/media/audiobooks/…`→`/audiobooks/audiobooks/…` |
 | Readarr URL | **`https://readarr.fleet.clark.team`** (never node IP, never Speakarr `:8787`) |
 | API key | Nomad Variable via workload identity template — never inline Env |
 | Liveness | HTTP `GET /healthz` → 200 |
@@ -50,6 +53,8 @@ Root-only stamp under `/mnt/moosefs/backups/app-state/goshelf/<UTC>/` using SQLi
 - Counts preserved; mounts healthy.
 - `/healthz` 200, `/readyz` 200, `/login` 200, `/` → 303.
 - Readarr durable connectivity; cover proxy and book-file lookup succeed for sampled IDs (no titles/paths in logs/audit).
+- Ebook/audiobook download-info + bounded Range ZIP succeed when metadata `fileCount>0` (path map must resolve under mount root).
+- Path mapping rejects traversal/outside-root; no arbitrary segment-strip fallback.
 - No bulk download/index trigger.
 
 ## Audit hygiene

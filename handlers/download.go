@@ -133,7 +133,11 @@ func (h *Handlers) getBookValidFiles(id int) ([]validFile, int, error) {
 	results := make(chan fileResult, len(files))
 	for i, f := range files {
 		go func(idx int, filePath string) {
-			localPath := h.resolveFilePath(filePath)
+			localPath, ok := h.resolveFilePath(filePath)
+			if !ok {
+				results <- fileResult{index: idx, valid: false}
+				return
+			}
 			info, err := os.Stat(localPath)
 			if err != nil {
 				results <- fileResult{index: idx, valid: false}
@@ -460,7 +464,11 @@ func (h *Handlers) DownloadZip(w http.ResponseWriter, r *http.Request) {
 	var vFiles []validFile
 
 	for _, f := range files {
-		localPath := h.resolveFilePath(f.Path)
+		localPath, ok := h.resolveFilePath(f.Path)
+		if !ok {
+			log.Printf("Error accessing file: rejected path mapping")
+			continue
+		}
 		info, err := os.Stat(localPath)
 		if err != nil {
 			log.Printf("Error accessing file %s: %v", localPath, err)
@@ -527,35 +535,96 @@ func (h *Handlers) DownloadZip(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// resolveFilePath converts Readarr's absolute path to local filesystem path
-// Readarr paths look like: /media/audiobooks/Author/Book/file.mp3
-// We strip the Readarr prefix and prepend MEDIA_PATH
-func (h *Handlers) resolveFilePath(readarrPath string) string {
-	// Common Readarr root prefixes to strip
-	prefixes := []string{
-		"/media/audiobooks/",
-		"/media/audiobooks",
+// MapReadarrPath maps a Readarr absolute path onto the local media mount root.
+//
+// Contract: Readarr stores paths under readarrRoot (e.g. /media/ebooks/...,
+// /media/audiobooks/...). The same tree is mounted locally at mediaRoot
+// (e.g. /audiobooks). Mapping is a strict root rewrite:
+//
+//	/media/ebooks/X      → /audiobooks/ebooks/X
+//	/media/audiobooks/X  → /audiobooks/audiobooks/X
+//
+// Returns ("", false) when the input is empty, relative, escapes the configured
+// root via ".." / unclean segments, or would land outside mediaRoot. There is
+// no arbitrary "strip Nth path segment" fallback.
+func MapReadarrPath(readarrRoot, mediaRoot, readarrPath string) (string, bool) {
+	readarrRoot = filepath.Clean(strings.TrimSpace(readarrRoot))
+	mediaRoot = filepath.Clean(strings.TrimSpace(mediaRoot))
+	readarrPath = strings.TrimSpace(readarrPath)
+	if readarrRoot == "" || readarrRoot == "." || mediaRoot == "" || mediaRoot == "." || readarrPath == "" {
+		return "", false
 	}
-
-	relativePath := readarrPath
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(readarrPath, prefix) {
-			relativePath = strings.TrimPrefix(readarrPath, prefix)
-			break
+	if !filepath.IsAbs(readarrRoot) || !filepath.IsAbs(mediaRoot) {
+		return "", false
+	}
+	cleaned := filepath.Clean(readarrPath)
+	if !filepath.IsAbs(cleaned) {
+		return "", false
+	}
+	if !pathWithinRoot(cleaned, readarrRoot) {
+		return "", false
+	}
+	rel, err := filepath.Rel(readarrRoot, cleaned)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", false
+	}
+	if filepath.IsAbs(rel) {
+		return "", false
+	}
+	// Reject any remaining ".." after Rel (defensive; Clean+Rel should prevent).
+	for _, seg := range strings.Split(rel, string(os.PathSeparator)) {
+		if seg == ".." {
+			return "", false
 		}
 	}
+	out := filepath.Clean(filepath.Join(mediaRoot, rel))
+	if !pathWithinRoot(out, mediaRoot) {
+		return "", false
+	}
+	return out, true
+}
 
-	// If path still starts with /, try to strip up to the 3rd segment
-	// (handles arbitrary Readarr root folder configurations)
-	if strings.HasPrefix(relativePath, "/") {
-		parts := strings.SplitN(relativePath, "/", 4)
-		if len(parts) >= 4 {
-			// /media/audiobooks/Author/Book/file -> Author/Book/file
-			relativePath = strings.Join(parts[3:], "/")
+// pathWithinRoot reports whether path is root or a descendant of root after Clean.
+func pathWithinRoot(path, root string) bool {
+	path = filepath.Clean(path)
+	root = filepath.Clean(root)
+	if path == root {
+		return true
+	}
+	sep := string(os.PathSeparator)
+	return strings.HasPrefix(path, root+sep)
+}
+
+// resolveFilePath converts a Readarr absolute path to a local filesystem path
+// using READARR_MEDIA_ROOT → MEDIA_PATH root mapping. Returns ("", false) when
+// the path is rejected (outside root / traversal). When the path exists,
+// symlink targets must also remain under MEDIA_PATH.
+func (h *Handlers) resolveFilePath(readarrPath string) (string, bool) {
+	local, ok := MapReadarrPath(h.readarrMediaRoot, h.mediaPath, readarrPath)
+	if !ok {
+		return "", false
+	}
+	// If the path (or an intermediate link) resolves, require the real path stay in-root.
+	if real, err := filepath.EvalSymlinks(local); err == nil {
+		if !pathWithinRoot(real, h.mediaPath) {
+			return "", false
+		}
+		return real, true
+	}
+	// Also reject when a parent exists as a symlink escape (EvalSymlinks on missing leaf).
+	dir := filepath.Dir(local)
+	if realDir, err := filepath.EvalSymlinks(dir); err == nil {
+		// Reconstruct with real parent; ensure under media root.
+		candidate := filepath.Join(realDir, filepath.Base(local))
+		if !pathWithinRoot(candidate, h.mediaPath) && !pathWithinRoot(realDir, h.mediaPath) {
+			return "", false
+		}
+		// If parent escaped, reject.
+		if !pathWithinRoot(realDir, h.mediaPath) {
+			return "", false
 		}
 	}
-
-	return filepath.Join(h.mediaPath, relativePath)
+	return local, true
 }
 
 func sanitizeFilename(s string) string {

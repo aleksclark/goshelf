@@ -66,7 +66,10 @@ job "goshelf" {
       env {
         LISTEN_ADDR = ":${NOMAD_PORT_http}"
         DB_PATH     = "/configs/goshelf/goshelf.db"
-        MEDIA_PATH  = "/audiobooks/audiobooks"
+        # Local mount root of moosefs-media (hosts both ebooks/ and audiobooks/).
+        MEDIA_PATH = "/audiobooks"
+        # Readarr absolute path root rewritten onto MEDIA_PATH (strict; no segment strip).
+        READARR_MEDIA_ROOT = "/media"
         # Durable Readarr fleet hostname (never node IP or alternate product ports).
         READARR_URL = "https://readarr.fleet.clark.team"
       }

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/aleksclark/goshelf/models"
@@ -11,16 +12,27 @@ import (
 )
 
 type Handlers struct {
-	db        *sql.DB
-	client    *readarr.Client
-	mediaPath string
+	db               *sql.DB
+	client           *readarr.Client
+	mediaPath        string // local mount root (e.g. /audiobooks)
+	readarrMediaRoot string // Readarr path root (e.g. /media)
 }
 
-func New(db *sql.DB, client *readarr.Client, mediaPath string) *Handlers {
+// New constructs handlers with explicit Readarr→local media root mapping.
+// mediaPath is the in-container mount of the same tree Readarr sees under readarrMediaRoot.
+// Empty readarrMediaRoot defaults to "/media".
+func New(db *sql.DB, client *readarr.Client, mediaPath, readarrMediaRoot string) *Handlers {
+	if strings.TrimSpace(readarrMediaRoot) == "" {
+		readarrMediaRoot = "/media"
+	}
+	if strings.TrimSpace(mediaPath) == "" {
+		mediaPath = "/audiobooks"
+	}
 	return &Handlers{
-		db:        db,
-		client:    client,
-		mediaPath: mediaPath,
+		db:               db,
+		client:           client,
+		mediaPath:        filepath.Clean(mediaPath),
+		readarrMediaRoot: filepath.Clean(readarrMediaRoot),
 	}
 }
 
