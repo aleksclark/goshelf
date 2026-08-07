@@ -113,11 +113,18 @@ func TestJobspecPersistentMounts(t *testing.T) {
 		`destination = "/audiobooks"`,
 		`destination = "/configs"`,
 		`DB_PATH     = "/configs/goshelf/goshelf.db"`,
-		`MEDIA_PATH  = "/audiobooks/audiobooks"`,
+		// MEDIA_PATH is the mount root (not the audiobooks leaf) so ebooks + audiobooks map.
+		`MEDIA_PATH = "/audiobooks"`,
+		`READARR_MEDIA_ROOT = "/media"`,
 	} {
 		if !strings.Contains(body, needle) {
 			t.Fatalf("missing mount/path contract %q", needle)
 		}
+	}
+	// Reject legacy leaf-only MEDIA_PATH that broke ebook downloads.
+	if strings.Contains(body, `MEDIA_PATH = "/audiobooks/audiobooks"`) ||
+		strings.Contains(body, `MEDIA_PATH  = "/audiobooks/audiobooks"`) {
+		t.Fatal("MEDIA_PATH must be mount root /audiobooks, not /audiobooks/audiobooks leaf")
 	}
 }
 

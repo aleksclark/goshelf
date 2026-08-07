@@ -17,7 +17,10 @@ func main() {
 	// READARR_URL should be the durable fleet hostname (e.g. https://readarr.fleet.clark.team).
 	readarrURL := mustEnv("READARR_URL")
 	readarrAPIKey := mustEnv("READARR_API_KEY")
+	// MEDIA_PATH is the local mount root of the same tree Readarr stores under READARR_MEDIA_ROOT.
+	// Example: Readarr /media/ebooks/... and /media/audiobooks/... map to /audiobooks/ebooks/... and /audiobooks/audiobooks/...
 	mediaPath := getEnv("MEDIA_PATH", "/audiobooks")
+	readarrMediaRoot := getEnv("READARR_MEDIA_ROOT", "/media")
 	listenAddr := getEnv("LISTEN_ADDR", ":8080")
 	dbPath := getEnv("DB_PATH", "./goshelf.db")
 
@@ -32,7 +35,7 @@ func main() {
 	client := readarr.NewClient(readarrURL, readarrAPIKey)
 
 	// Initialize handlers
-	h := handlers.New(db, client, mediaPath)
+	h := handlers.New(db, client, mediaPath, readarrMediaRoot)
 
 	// Start background cleanup of stale temp ZIP files
 	handlers.StartZipCleanup()
@@ -83,7 +86,7 @@ func main() {
 
 	log.Printf("GoShelf %s starting on %s", Version, listenAddr)
 	log.Printf("Readarr URL: %s", readarrURL)
-	log.Printf("Media path: %s", mediaPath)
+	log.Printf("Media path: %s (readarr root: %s)", mediaPath, readarrMediaRoot)
 
 	if err := http.ListenAndServe(listenAddr, mux); err != nil {
 		log.Fatalf("Server failed: %v", err)
