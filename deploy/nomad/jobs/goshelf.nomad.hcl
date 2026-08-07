@@ -59,7 +59,7 @@ job "goshelf" {
       config {
         # Pin updated post-release to exact linux/amd64 digest.
         # Placeholder tag matches last known good until release workflow lands new digest.
-        image = "ghcr.io/aleksclark/goshelf:v2026.8.0@sha256:26bdd62797af2fe4ca8cadd4af2b0da9cf8e646509719b963bd2df8e30ff52cb"
+        image = "ghcr.io/aleksclark/goshelf:v2026.8.2@sha256:ade4fdfb1a61e1eee618e468e869881a34e613cc950950178f0ca2b949583548"
         ports = ["http"]
       }
 
