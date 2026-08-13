@@ -1,6 +1,7 @@
 package deploycontract_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,20 +20,25 @@ func repoRoot(t *testing.T) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
 }
 
-func readJob(t *testing.T) string {
+func readFile(t *testing.T, rel ...string) string {
 	t.Helper()
-	p := filepath.Join(repoRoot(t), "deploy", "nomad", "jobs", "goshelf.nomad.hcl")
+	p := filepath.Join(append([]string{repoRoot(t)}, rel...)...)
 	b, err := os.ReadFile(p)
 	if err != nil {
-		t.Fatalf("read jobspec: %v", err)
+		t.Fatalf("read %s: %v", p, err)
 	}
 	return string(b)
+}
+
+func readJob(t *testing.T) string {
+	t.Helper()
+	return readFile(t, "deploy", "nomad", "jobs", "goshelf.nomad.hcl")
 }
 
 func TestJobspecExistsAndJobID(t *testing.T) {
 	body := readJob(t)
 	if !strings.Contains(body, `job "goshelf"`) {
-		t.Fatal("missing job \"goshelf\"")
+		t.Fatal(`missing job "goshelf"`)
 	}
 }
 
@@ -135,6 +141,189 @@ func TestJobspecUpdateRollback(t *testing.T) {
 	}
 	if !strings.Contains(body, `max_parallel      = 1`) {
 		t.Fatal("missing max_parallel = 1")
+	}
+	if !strings.Contains(body, `canary            = 0`) && !regexp.MustCompile(`canary\s*=\s*0`).MatchString(body) {
+		t.Fatal("missing canary = 0")
+	}
+	if !strings.Contains(body, "stop-before-start") {
+		t.Fatal("missing stop-before-start singleton policy marker")
+	}
+	if !regexp.MustCompile(`count\s*=\s*1`).MatchString(body) {
+		t.Fatal("group count must be 1")
+	}
+}
+
+func TestJobspecProvenanceMeta(t *testing.T) {
+	body := readJob(t)
+	for _, key := range []string{
+		"managed_by",
+		"source_repo",
+		"source_path",
+		"source_revision",
+		"deployment_owner",
+		"release_set",
+	} {
+		if !strings.Contains(body, key) {
+			t.Fatalf("meta missing %q", key)
+		}
+	}
+	if !strings.Contains(body, `managed_by                 = "fleet-reconciler"`) &&
+		!strings.Contains(body, `managed_by = "fleet-reconciler"`) &&
+		!strings.Contains(body, `managed_by = "fleet-pull-reconciler"`) {
+		// Accept either spacing; require canonical or legacy value.
+		if !regexp.MustCompile(`managed_by\s*=\s*"(fleet-reconciler|fleet-pull-reconciler)"`).MatchString(body) {
+			t.Fatal(`managed_by must be "fleet-reconciler" or legacy "fleet-pull-reconciler"`)
+		}
+	}
+	if !regexp.MustCompile(`deployment_owner\s*=\s*"aleks-clark"`).MatchString(body) {
+		t.Fatal(`deployment_owner must be "aleks-clark"`)
+	}
+	if !regexp.MustCompile(`release_set\s*=\s*"goshelf"`).MatchString(body) {
+		t.Fatal(`release_set must be "goshelf"`)
+	}
+	if !strings.Contains(body, "deploy/nomad/jobs/goshelf.nomad.hcl") {
+		t.Fatal("source_path must reference deploy/nomad/jobs/goshelf.nomad.hcl")
+	}
+}
+
+func TestJobspecImageDigestPinned(t *testing.T) {
+	body := readJob(t)
+	lock := readFile(t, "deploy", "nomad", "images.lock.hcl")
+	re := regexp.MustCompile(`@sha256:([0-9a-f]{64})`)
+	lockDigests := re.FindAllStringSubmatch(lock, -1)
+	if len(lockDigests) == 0 {
+		t.Fatal("images.lock.hcl missing sha256 digest")
+	}
+	digest := lockDigests[0][1]
+	if !strings.Contains(body, "@sha256:"+digest) {
+		t.Fatalf("jobspec image must match lock digest %s", digest[:12])
+	}
+	if regexp.MustCompile(`image\s*=\s*"[^"]*:latest"`).MatchString(body) {
+		t.Fatal("jobspec must not use :latest")
+	}
+	// Every image assignment must include a digest.
+	for _, line := range strings.Split(body, "\n") {
+		trim := strings.TrimSpace(line)
+		if !strings.HasPrefix(trim, "image") || !strings.Contains(trim, "=") {
+			continue
+		}
+		if !strings.Contains(trim, "@sha256:") {
+			t.Fatalf("image line missing digest: %s", trim)
+		}
+	}
+}
+
+func TestDeploymentManifestContract(t *testing.T) {
+	text := readFile(t, "deploy", "nomad", "deployment.yaml")
+	for _, key := range []string{
+		"schema_version: 1",
+		"project: goshelf",
+		"owner: aleks-clark",
+		"repository: https://github.com/aleksclark/goshelf",
+		"ref_policy: signed-default-branch-commit",
+		"namespace: default",
+		"datacenters: [home]",
+		"name: goshelf",
+		"id: goshelf",
+		"spec: jobs/goshelf.nomad.hcl",
+		"env: env/home.nomadvars.hcl",
+		"images: images.lock.hcl",
+		"nomad/jobs/goshelf",
+		"rollout: serial",
+		"prune: explicit-only",
+	} {
+		if !strings.Contains(text, key) {
+			t.Fatalf("deployment.yaml missing %q", key)
+		}
+	}
+	if regexp.MustCompile(`(?i)postgres://[^:]+:[^@]+@`).MatchString(text) {
+		t.Fatal("deployment.yaml appears to contain a DSN with credentials")
+	}
+}
+
+func TestImagesLockDigestOnly(t *testing.T) {
+	text := readFile(t, "deploy", "nomad", "images.lock.hcl")
+	re := regexp.MustCompile(`image_goshelf\s*=\s*"ghcr\.io/aleksclark/goshelf@sha256:[0-9a-f]{64}"`)
+	if !re.MatchString(text) {
+		t.Fatal("images.lock.hcl must set image_goshelf to digest-only ref")
+	}
+	if regexp.MustCompile(`:(latest|main|master)"`).MatchString(text) {
+		t.Fatal("images.lock.hcl forbids mutable tags as authority")
+	}
+}
+
+func TestEnvOverlayNonSecret(t *testing.T) {
+	text := readFile(t, "deploy", "nomad", "env", "home.nomadvars.hcl")
+	if regexp.MustCompile(`(?i)api[_-]?key\s*=`).MatchString(text) {
+		t.Fatal("env overlay must not assign api keys")
+	}
+	if regexp.MustCompile(`(?i)password\s*=`).MatchString(text) {
+		t.Fatal("env overlay must not assign passwords")
+	}
+	for _, needle := range []string{
+		"moosefs-media",
+		"moosefs-configs",
+		"readarr.fleet.clark.team",
+		"/configs/goshelf/goshelf.db",
+	} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("env overlay missing %q", needle)
+		}
+	}
+}
+
+func TestCODEOWNERS(t *testing.T) {
+	text := readFile(t, ".github", "CODEOWNERS")
+	if !regexp.MustCompile(`(?m)^/deploy/nomad/\s+@aleksclark\s*$`).MatchString(text) {
+		t.Fatal("CODEOWNERS must own /deploy/nomad/ @aleksclark")
+	}
+	if !strings.Contains(text, "/.github/workflows/release") {
+		t.Fatal("CODEOWNERS must own release workflows")
+	}
+}
+
+func TestExpectedServicesJSON(t *testing.T) {
+	raw := readFile(t, "deploy", "nomad", "tests", "expected-services.json")
+	var data map[string]any
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		t.Fatalf("expected-services.json: %v", err)
+	}
+	if data["job_id"] != "goshelf" {
+		t.Fatalf("job_id=%v", data["job_id"])
+	}
+	groups, ok := data["groups"].([]any)
+	if !ok || len(groups) == 0 {
+		t.Fatal("expected groups")
+	}
+	g0, ok := groups[0].(map[string]any)
+	if !ok {
+		t.Fatal("group[0] shape")
+	}
+	if g0["count"] != float64(1) {
+		t.Fatalf("count=%v", g0["count"])
+	}
+	upd, ok := g0["update"].(map[string]any)
+	if !ok {
+		t.Fatal("missing update")
+	}
+	if upd["max_parallel"] != float64(1) || upd["canary"] != float64(0) {
+		t.Fatalf("update=%v", upd)
+	}
+}
+
+func TestREADMEOperatorNotes(t *testing.T) {
+	text := readFile(t, "deploy", "nomad", "README.md")
+	for _, needle := range []string{
+		"/configs/goshelf/goshelf.db",
+		"WAL",
+		"backup",
+		"NEVER",
+		"stop-before-start",
+		"SQLite",
+	} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("README missing %q", needle)
+		}
 	}
 }
 

@@ -1,0 +1,20 @@
+# Project deployment contract for goshelf (plan 03 §3).
+# Value-free. Secrets live only in Nomad Variables (paths listed below).
+schema_version: 1
+project: goshelf
+owner: aleks-clark
+repository: https://github.com/aleksclark/goshelf
+ref_policy: signed-default-branch-commit
+namespace: default
+datacenters: [home]
+release_sets:
+  - name: goshelf
+    jobs:
+      - id: goshelf
+        spec: jobs/goshelf.nomad.hcl
+    env: env/home.nomadvars.hcl
+    images: images.lock.hcl
+    variable_paths:
+      - nomad/jobs/goshelf
+    rollout: serial
+    prune: explicit-only

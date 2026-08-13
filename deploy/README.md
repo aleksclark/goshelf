@@ -1,6 +1,17 @@
 # GoShelf deployment contract
 
-Project-owned singleton. Canonical jobspec: `deploy/nomad/jobs/goshelf.nomad.hcl`.
+Project-owned singleton. Full plan 03 §3 tree lives under `deploy/nomad/`:
+
+| Path | Role |
+|---|---|
+| `nomad/deployment.yaml` | Source/ownership/reconcile manifest |
+| `nomad/jobs/goshelf.nomad.hcl` | Canonical jobspec |
+| `nomad/env/home.nomadvars.hcl` | Non-secret home overlay |
+| `nomad/images.lock.hcl` | Digest-only image lock |
+| `nomad/README.md` | Operator notes (SQLite singleton, backup/restore) |
+| `nomad/tests/` | L1 contract.sh + expected-services.json |
+
+Run `./deploy/nomad/tests/contract.sh` for static validation.
 
 ## Ownership
 
@@ -9,6 +20,7 @@ Project-owned singleton. Canonical jobspec: `deploy/nomad/jobs/goshelf.nomad.hcl
 - Classification: project-owned, stateful singleton
 - Secret path: `nomad/jobs/goshelf` → key `readarr_api_key`
 - Fleet ledger tracks ownership; **do not** duplicate the jobspec in fleet-iac.
+- Source-only (S0→S1): this tree is prepared for shadow/reconciler enrollment; do **not** flip fleet authority from this PR.
 
 ## Runtime contract
 
