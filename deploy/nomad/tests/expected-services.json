@@ -1,0 +1,82 @@
+{
+  "job_id": "goshelf",
+  "namespace": "default",
+  "datacenters": ["home"],
+  "type": "service",
+  "groups": [
+    {
+      "name": "goshelf",
+      "count": 1,
+      "update": {
+        "max_parallel": 1,
+        "canary": 0,
+        "auto_revert": true,
+        "policy_notes": "stop-before-start singleton; never dual SQLite writers"
+      },
+      "services": [
+        {
+          "name": "goshelf",
+          "port_label": "http",
+          "provider": "nomad",
+          "static_port": 8580,
+          "hostnames": [
+            "books.fleet.clark.team",
+            "books.clark.team"
+          ],
+          "checks": [
+            {
+              "name": "goshelf-liveness",
+              "type": "http",
+              "path": "/healthz",
+              "interval": "15s"
+            },
+            {
+              "name": "goshelf-readiness",
+              "type": "http",
+              "path": "/readyz",
+              "interval": "15s"
+            }
+          ]
+        }
+      ],
+      "volumes": [
+        {
+          "name": "moosefs-media",
+          "type": "host",
+          "source": "moosefs-media",
+          "read_only": true,
+          "destination": "/audiobooks"
+        },
+        {
+          "name": "moosefs-configs",
+          "type": "host",
+          "source": "moosefs-configs",
+          "read_only": false,
+          "destination": "/configs"
+        }
+      ]
+    }
+  ],
+  "sqlite": {
+    "db_path": "/configs/goshelf/goshelf.db",
+    "single_writer": true,
+    "forbid_concurrent_allocs": true
+  },
+  "secrets": {
+    "variable_path": "nomad/jobs/goshelf",
+    "keys": ["readarr_api_key"]
+  },
+  "image": {
+    "repository": "ghcr.io/aleksclark/goshelf",
+    "authority": "digest",
+    "forbid_latest": true
+  },
+  "meta_required": [
+    "managed_by",
+    "source_repo",
+    "source_path",
+    "source_revision",
+    "deployment_owner",
+    "release_set"
+  ]
+}
