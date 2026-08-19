@@ -1,0 +1,56 @@
+# GoShelf Stacklane-compatible local dev stack (single Go binary).
+# Lifecycle: scripts/compose-dev.sh (always pass -p goshelf-<instance>).
+# Publish ONLY 127.0.0.1::<containerPort> (ephemeral host port). Never 0.0.0.0 / fixed host ports.
+#
+# READARR_* is optional — no secret defaults. Host `go run .` remains the non-Docker path.
+# Compose project name is set only via `docker compose -p` (never hardcoded here).
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    working_dir: /src
+    # Air as PID1 (image CMD); no shell wrapper swallowing signals.
+    command: ["air", "-c", ".air.toml"]
+    environment:
+      STACKLANE_INSTANCE: ${STACKLANE_INSTANCE:?set by scripts/compose-dev.sh}
+      LISTEN_ADDR: ":8080"
+      DB_PATH: /data/goshelf.db
+      MEDIA_PATH: /audiobooks
+      READARR_MEDIA_ROOT: /media
+      # Optional — empty by default. Operators may pass host values; never commit secrets.
+      READARR_URL: ${READARR_URL-}
+      READARR_API_KEY: ${READARR_API_KEY-}
+      GOPATH: /go
+      GOCACHE: /go-cache
+      GOMODCACHE: /go/pkg/mod
+    volumes:
+      # Entire repo source RW for Air rebuilds.
+      - .:/src
+      - goshelf_go_mod_cache:/go/pkg/mod
+      - goshelf_go_build_cache:/go-cache
+      # Air binary + build-errors.log (not on the host bind-mounted tracked tree).
+      - goshelf_air_tmp:/src/tmp
+      - goshelf_data:/data
+    ports:
+      - "127.0.0.1::8080"
+    labels:
+      stacklane.enable: "true"
+      stacklane.project: "goshelf"
+      stacklane.instance: ${STACKLANE_INSTANCE:?set by scripts/compose-dev.sh}
+      stacklane.endpoint: "web"
+      stacklane.port: "8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 180s
+    restart: unless-stopped
+
+volumes:
+  goshelf_go_mod_cache:
+  goshelf_go_build_cache:
+  goshelf_air_tmp:
+  goshelf_data:

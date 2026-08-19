@@ -1,0 +1,36 @@
+# Git / CI
+.git
+.github
+.gitignore
+
+# Local env / secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Dev / test artifacts
+*.db
+*.db-*
+*.sqlite*
+coverage*
+*.out
+tmp
+temp
+.temp
+
+# Generated templ (rebuilt in-container)
+*_templ.go
+
+# Android / deploy not needed for the Go web binary
+android
+deploy
+
+# Docs
+*.md
+!go.mod
+
+# IDE
+.idea
+.vscode
+.history
