@@ -69,6 +69,25 @@ func TestPingEmptyBaseURL(t *testing.T) {
 	}
 }
 
+func TestNewClientEmptyURLServesEmptyCatalog(t *testing.T) {
+	t.Parallel()
+	c := NewClient("", "")
+	authors, err := c.GetCachedAuthors()
+	if err != nil {
+		t.Fatalf("empty Readarr URL should serve empty catalog, got %v", err)
+	}
+	if len(authors) != 0 {
+		t.Fatalf("authors=%d want 0", len(authors))
+	}
+	books, _, err := c.GetCachedBooks()
+	if err != nil {
+		t.Fatalf("empty Readarr URL should serve empty books, got %v", err)
+	}
+	if len(books) != 0 {
+		t.Fatalf("books=%d want 0", len(books))
+	}
+}
+
 func TestPingStaleHostClass(t *testing.T) {
 	t.Parallel()
 	// Simulates stale node/port dependency: server never binds the requested path host.

@@ -14,9 +14,10 @@ var Version = "dev"
 
 func main() {
 	// Configuration from environment — no secret defaults.
-	// READARR_URL should be the durable fleet hostname (e.g. https://readarr.fleet.clark.team).
-	readarrURL := mustEnv("READARR_URL")
-	readarrAPIKey := mustEnv("READARR_API_KEY")
+	// READARR_* is optional so host `go run .` and compose can start without secrets.
+	// Production still sets the durable fleet hostname (e.g. https://readarr.fleet.clark.team).
+	readarrURL := getEnv("READARR_URL", "")
+	readarrAPIKey := getEnv("READARR_API_KEY", "")
 	// MEDIA_PATH is the local mount root of the same tree Readarr stores under READARR_MEDIA_ROOT.
 	// Example: Readarr /media/ebooks/... and /media/audiobooks/... map to /audiobooks/ebooks/... and /audiobooks/audiobooks/...
 	mediaPath := getEnv("MEDIA_PATH", "/audiobooks")
@@ -85,7 +86,11 @@ func main() {
 	mux.HandleFunc("POST /admin/users/{id}/toggle-admin", h.RequireAdmin(h.AdminToggleAdmin))
 
 	log.Printf("GoShelf %s starting on %s", Version, listenAddr)
-	log.Printf("Readarr URL: %s", readarrURL)
+	if readarrURL == "" {
+		log.Printf("Readarr URL unset; library metadata disabled")
+	} else {
+		log.Printf("Readarr URL: %s", readarrURL)
+	}
 	log.Printf("Media path: %s (readarr root: %s)", mediaPath, readarrMediaRoot)
 
 	if err := http.ListenAndServe(listenAddr, mux); err != nil {
@@ -98,12 +103,4 @@ func getEnv(key, fallback string) string {
 		return val
 	}
 	return fallback
-}
-
-func mustEnv(key string) string {
-	val := os.Getenv(key)
-	if val == "" {
-		log.Fatalf("required environment variable %s is not set", key)
-	}
-	return val
 }

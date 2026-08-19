@@ -90,10 +90,10 @@ type Client struct {
 	mu            sync.RWMutex
 	authors       []Author
 	books         []Book
-	authorMap     map[int]string // authorID -> name
-	booksByAuth   map[int][]Book // authorID -> books
-	bookByID      map[int]*Book  // bookID -> book
-	seriesList    []SeriesInfo   // all series sorted by name
+	authorMap     map[int]string    // authorID -> name
+	booksByAuth   map[int][]Book    // authorID -> books
+	bookByID      map[int]*Book     // bookID -> book
+	seriesList    []SeriesInfo      // all series sorted by name
 	booksBySeries map[string][]Book // slug -> books
 	loaded        bool
 }
@@ -169,6 +169,14 @@ func NewClient(baseURL, apiKey string) *Client {
 		booksByAuth:   make(map[int][]Book),
 		bookByID:      make(map[int]*Book),
 		booksBySeries: make(map[string][]Book),
+	}
+
+	if strings.TrimSpace(baseURL) == "" {
+		// Mark loaded so library/API cache readers serve an empty catalog
+		// instead of 500 "data not yet loaded" when READARR_* is optional.
+		c.loaded = true
+		log.Printf("Readarr URL not set; metadata fetch disabled")
+		return c
 	}
 
 	// Initial load (blocking)
