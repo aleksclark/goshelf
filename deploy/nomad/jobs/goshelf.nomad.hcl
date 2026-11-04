@@ -103,7 +103,7 @@ job "goshelf" {
         # Pin updated post-release to exact linux/amd64 digest.
         # Must match deploy/nomad/images.lock.hcl image_goshelf digest authority.
         # Digest-only production authority; human tag is traceability only.
-        image = "ghcr.io/aleksclark/goshelf:v2026.8.2@sha256:ade4fdfb1a61e1eee618e468e869881a34e613cc950950178f0ca2b949583548"
+        image = "ghcr.io/aleksclark/goshelf:v2026.11.0@sha256:83346510d1263f396cf18293360dec085d6a0a24bc9f073f8d4722712219d514"
         ports = ["http"]
       }
 
