@@ -5,9 +5,12 @@ import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
 import com.google.gson.reflect.TypeToken
 import com.goshelf.app.data.repository.SettingsRepository
+import okhttp3.Call
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
+import java.io.Closeable
 import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.TimeUnit
@@ -47,10 +50,45 @@ data class LoginResult(
 )
 
 data class DownloadInfo(
-    val totalSize: Long,
-    val etag: String,
-    val filename: String
+    val status: String? = null,
+    val totalSize: Long = 0,
+    val etag: String = "",
+    val filename: String = "",
+    val fileCount: Int = 0,
+    val skippedFiles: Int = 0,
+    val retryAfter: Int = 0
 )
+
+sealed interface DownloadInfoResult {
+    data class Ready(val info: DownloadInfo) : DownloadInfoResult
+    data class Preparing(val retryAfterSeconds: Int) : DownloadInfoResult
+}
+
+/** Session is missing or expired; retrying will not help until the user logs in again. */
+class NotAuthenticatedException : IOException("Not authenticated")
+
+/** Server answered with an HTTP error status. */
+class HttpStatusException(val code: Int, message: String) : IOException(message) {
+    /** 5xx, 408 and 429 are worth retrying; other 4xx are not. */
+    val isRetryable: Boolean get() = code >= 500 || code == 408 || code == 429
+}
+
+/**
+ * An open download.zip response. Callers must close it; [cancel] aborts a
+ * blocked read from another thread.
+ */
+class ZipStream(
+    private val call: Call,
+    private val response: Response,
+    val code: Int,
+    val contentRange: String?,
+    val etag: String?,
+    val contentLength: Long,
+    val body: InputStream
+) : Closeable {
+    fun cancel() = call.cancel()
+    override fun close() = response.close()
+}
 
 data class APIAuthor(
     val id: Int = 0,
@@ -87,16 +125,27 @@ class GoShelfApi(
 
     companion object {
         private const val TAG = "GoShelfApi"
-        private const val DOWNLOAD_READ_TIMEOUT_MINUTES = 5L
+        private const val DOWNLOAD_READ_TIMEOUT_SECONDS = 45L
+        private const val DOWNLOAD_INFO_READ_TIMEOUT_SECONDS = 90L
     }
 
     /**
-     * A client with extended read timeout for download operations.
+     * Client for ZIP transfers. The server builds the ZIP before download-info
+     * answers ready, so bytes should flow immediately; a short read timeout
+     * detects dead connections (screen-off Wi-Fi drops, network handoffs)
+     * quickly instead of hanging for minutes before the resume kicks in.
      */
     private val downloadClient: OkHttpClient by lazy {
         client.newBuilder()
-            .readTimeout(DOWNLOAD_READ_TIMEOUT_MINUTES, TimeUnit.MINUTES)
-            .writeTimeout(DOWNLOAD_READ_TIMEOUT_MINUTES, TimeUnit.MINUTES)
+            .readTimeout(DOWNLOAD_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .writeTimeout(DOWNLOAD_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .build()
+    }
+
+    /** download-info may block on the server for up to ~20s while the ZIP builds. */
+    private val downloadInfoClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .readTimeout(DOWNLOAD_INFO_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .build()
     }
 
@@ -210,71 +259,96 @@ class GoShelfApi(
     }
 
     /**
-     * Gets download metadata (size, etag, filename) without downloading the file.
+     * Asks the server to prepare the book ZIP and returns its exact size and
+     * ETag once ready. Returns [DownloadInfoResult.Preparing] while the server
+     * is still building it; callers should poll after the suggested delay.
      */
-    fun getDownloadInfo(bookId: Int): DownloadInfo {
+    fun getDownloadInfo(bookId: Int): DownloadInfoResult {
         val request = Request.Builder()
-            .url("${baseUrl()}/api/books/$bookId/download-info")
+            .url("${baseUrl()}/api/books/$bookId/download-info?async=1")
             .get()
             .build()
 
-        val response = client.newCall(request).execute()
+        downloadInfoClient.newCall(request).execute().use { response ->
+            when (response.code) {
+                401, 302, 303 -> throw NotAuthenticatedException()
+                202 -> {
+                    val retryAfter = response.header("Retry-After")?.toIntOrNull() ?: 5
+                    return DownloadInfoResult.Preparing(retryAfter)
+                }
+            }
+            if (!response.isSuccessful) {
+                throw HttpStatusException(response.code, "Failed to get download info: ${response.code}")
+            }
 
-        if (response.code == 303 || response.code == 302) {
-            throw IOException("Not authenticated")
-        }
-
-        if (!response.isSuccessful) {
-            throw IOException("Failed to get download info: ${response.code}")
-        }
-
-        val body = response.body?.string() ?: throw IOException("Empty response")
-
-        return try {
-            gson.fromJson(body, DownloadInfo::class.java)
-                ?: throw IOException("Failed to parse download info")
-        } catch (e: JsonSyntaxException) {
-            Log.e(TAG, "getDownloadInfo: JSON parse error", e)
-            throw IOException("Failed to parse download info: ${e.message}")
+            val body = response.body?.string() ?: throw IOException("Empty response")
+            val info = try {
+                gson.fromJson(body, DownloadInfo::class.java)
+                    ?: throw IOException("Failed to parse download info")
+            } catch (e: JsonSyntaxException) {
+                Log.e(TAG, "getDownloadInfo: JSON parse error", e)
+                throw IOException("Failed to parse download info: ${e.message}")
+            }
+            if (info.status == "preparing") {
+                return DownloadInfoResult.Preparing(info.retryAfter.takeIf { it > 0 } ?: 5)
+            }
+            if (info.etag.isEmpty() || info.totalSize <= 0) {
+                throw IOException("Server returned incomplete download info")
+            }
+            return DownloadInfoResult.Ready(info)
         }
     }
 
     /**
-     * Downloads the ZIP file for a book starting from [rangeStart] byte offset.
-     * Uses Range header for resume support.
-     * Returns the InputStream and the content length of this response segment.
+     * Opens the book ZIP starting at [rangeStart]. When resuming, [ifRange]
+     * must be the ETag the partial data belongs to; the server then answers
+     * 206 for the same ZIP or a full 200 if it changed.
      */
-    fun downloadZipRange(bookId: Int, rangeStart: Long): Pair<InputStream, Long> {
+    fun openZipStream(bookId: Int, rangeStart: Long, ifRange: String?): ZipStream {
         val requestBuilder = Request.Builder()
             .url("${baseUrl()}/books/$bookId/download.zip")
             .get()
 
         if (rangeStart > 0) {
-            requestBuilder.addHeader("Range", "bytes=$rangeStart-")
+            requestBuilder.header("Range", "bytes=$rangeStart-")
+            if (!ifRange.isNullOrEmpty()) {
+                requestBuilder.header("If-Range", ifRange)
+            }
         }
 
-        val request = requestBuilder.build()
-        val response = downloadClient.newCall(request).execute()
+        val call = downloadClient.newCall(requestBuilder.build())
+        val response = call.execute()
 
-        if (response.code == 303 || response.code == 302) {
-            throw IOException("Not authenticated")
+        if (response.code == 401 || response.code == 303 || response.code == 302) {
+            response.close()
+            throw NotAuthenticatedException()
+        }
+        if (!response.isSuccessful && response.code != 416) {
+            response.close()
+            throw HttpStatusException(response.code, "Failed to download: ${response.code}")
         }
 
-        // 200 = full content, 206 = partial content (range request honored)
-        if (!response.isSuccessful && response.code != 206) {
-            throw IOException("Failed to download: ${response.code}")
+        val body = response.body ?: run {
+            response.close()
+            throw IOException("Empty response body")
         }
-
-        val body = response.body ?: throw IOException("Empty response body")
-        val contentLength = body.contentLength()
-        return Pair(body.byteStream(), if (contentLength >= 0) contentLength else 0L)
+        return ZipStream(
+            call = call,
+            response = response,
+            code = response.code,
+            contentRange = response.header("Content-Range"),
+            etag = response.header("ETag"),
+            contentLength = body.contentLength(),
+            body = body.byteStream()
+        )
     }
 
     /**
-     * Legacy download method without range support (kept for compatibility).
+     * Downloads the whole ZIP in a single request (no resume).
      */
     fun downloadZip(bookId: Int): Pair<InputStream, Long> {
-        return downloadZipRange(bookId, 0)
+        val stream = openZipStream(bookId, 0, null)
+        return Pair(stream.body, if (stream.contentLength >= 0) stream.contentLength else 0L)
     }
 
     fun getAuthors(): List<APIAuthor> {

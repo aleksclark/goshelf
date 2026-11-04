@@ -75,7 +75,7 @@ class DownloadNotificationHelper(private val context: Context) {
         canRetry: Boolean
     ): NotificationCompat.Builder {
         val contentText = if (canRetry) {
-            "Failed: $error. Will retry automatically."
+            "Paused: $error. Will retry automatically."
         } else {
             "Failed: $error"
         }
@@ -89,15 +89,39 @@ class DownloadNotificationHelper(private val context: Context) {
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
     }
 
-    fun createExtractingNotification(title: String): NotificationCompat.Builder {
+    fun createExtractingNotification(
+        title: String,
+        progress: Int,
+        filesDone: Int,
+        fileCount: Int
+    ): NotificationCompat.Builder {
+        val text = if (fileCount > 0) {
+            "Extracting file ${(filesDone + 1).coerceAtMost(fileCount)} of $fileCount (${progress}%)"
+        } else {
+            "Extracting files..."
+        }
         return NotificationCompat.Builder(context, CHANNEL_ID)
             .setContentTitle(title)
-            .setContentText("Extracting files...")
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setProgress(100, progress, fileCount == 0)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+    }
+
+    /** Ongoing notification for phases without measurable progress (preparing, waiting for network). */
+    fun createStatusNotification(title: String, status: String): NotificationCompat.Builder {
+        return NotificationCompat.Builder(context, CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(status)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setProgress(0, 0, true)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
     }
 
     private fun formatBytes(bytes: Long): String {
