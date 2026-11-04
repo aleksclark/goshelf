@@ -219,7 +219,7 @@ class GoShelfIntegrationTest {
     }
 
     @Test
-    fun testDownloadAndExtract() = runBlocking {
+    fun testDownloadAndExtract() = runBlocking<Unit> {
         authRepository.login("testuser", "testpass")
 
         val (inputStream, contentLength) = api.downloadZip(1)

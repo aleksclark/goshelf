@@ -268,10 +268,14 @@ private fun DownloadSection(
     when {
         uiState.isDownloading -> {
             Column(modifier = Modifier.fillMaxWidth()) {
-                LinearProgressIndicator(
-                    progress = { (uiState.downloadProgress / 100f).coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                if (uiState.isIndeterminate) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                } else {
+                    LinearProgressIndicator(
+                        progress = { (uiState.downloadProgress / 100f).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 Spacer(modifier = Modifier.height(8.dp))
                 if (uiState.totalBytes > 0) {
                     Text(
@@ -323,7 +327,11 @@ private fun DownloadSection(
             Column(modifier = Modifier.fillMaxWidth()) {
                 if (uiState.bytesDownloaded > 0) {
                     Text(
-                        text = "Paused: ${formatFileSize(uiState.bytesDownloaded)} downloaded",
+                        text = if (uiState.totalBytes > 0) {
+                            "Paused: ${formatFileSize(uiState.bytesDownloaded)} of ${formatFileSize(uiState.totalBytes)} downloaded"
+                        } else {
+                            "Paused: ${formatFileSize(uiState.bytesDownloaded)} downloaded"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
