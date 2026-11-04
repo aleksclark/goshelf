@@ -16,6 +16,7 @@ type Handlers struct {
 	client           *readarr.Client
 	mediaPath        string // local mount root (e.g. /audiobooks)
 	readarrMediaRoot string // Readarr path root (e.g. /media)
+	zipCacheDir      string // cached ZIP directory; empty means os.TempDir()
 }
 
 // New constructs handlers with explicit Readarr→local media root mapping.
